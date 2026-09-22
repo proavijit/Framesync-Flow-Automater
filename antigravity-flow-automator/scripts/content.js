@@ -265,7 +265,7 @@
   }
 
   /**
-   * Locate the circular arrow submit button inside the active prompt container.
+   * Locate the circular arrow submit button inside the active prompt container or side drawer.
    * Dispatches full pointer/mouse sequence, or falls back to Enter key.
    */
   async function triggerFlowSubmitAction(inputEl, maxWaitMs = 10000) {
@@ -281,20 +281,22 @@
           buttonElement.classList.contains('disabled');
 
         if (!isDisabled) {
+          console.log("[Flow Automator] Found and clicked submit button:", buttonElement);
           console.log("Triggered submit button:", buttonElement);
           dispatchPointerAndClick(buttonElement);
           await delay(400);
           return true;
         } else {
-          console.log('[Flow Automator] Submit button found inside prompt container but disabled. Waiting for React state...');
+          console.log('[Flow Automator] Submit arrow button found in drawer but disabled. Waiting for React state...');
         }
       }
 
       await delay(500);
     }
 
-    // If button was found inside prompt container, click it
+    // If button was found inside drawer, click it
     if (buttonElement) {
+      console.log("[Flow Automator] Found and clicked submit button:", buttonElement);
       console.log("Triggered submit button:", buttonElement);
       dispatchPointerAndClick(buttonElement);
       await delay(400);
@@ -302,7 +304,7 @@
     }
 
     // Fallback: Dispatch Enter Key Sequence directly on input (NEVER clicks global header buttons)
-    console.log('[Flow Automator] No submit button inside prompt container. Dispatching Enter key sequence directly onto input...');
+    console.log('[Flow Automator] No submit button in drawer. Dispatching Enter key sequence directly onto input...');
     inputEl.focus();
     const eventParams = {
       key: 'Enter',
@@ -374,61 +376,40 @@
   }
 
   /**
-   * Specifically targets the submit button inside the active prompt container.
-   * SCOPED ONLY to the active prompt container hierarchy.
-   * Ensures the button is positioned near or below the prompt input, not in the top header.
+   * Specifically targets the submit button in the Right-Hand Flow Drawer / Chat Panel.
+   * Scoped to the drawer/session container and searches for the bottom-right circular arrow button.
    */
   function findGoogleFlowSubmitButton(inputEl) {
     if (!inputEl) return null;
 
     const inputRect = inputEl.getBoundingClientRect();
 
-    // 1. Get the prompt container wrapper
-    const promptContainer = inputEl.closest('form') ||
-                            inputEl.closest('div[class*="prompt" i]') ||
-                            inputEl.closest('div[class*="chat" i]') ||
-                            inputEl.closest('div[class*="input" i]') ||
-                            inputEl.closest('[role="region"]') ||
-                            inputEl.parentElement?.parentElement?.parentElement ||
-                            inputEl.parentElement;
+    // 1. Locate the Right-Hand Flow Drawer / Chat Panel / Session Container
+    const drawer = inputEl.closest('[role="complementary"]') || 
+                   inputEl.closest('aside') || 
+                   inputEl.closest('.session-container') ||
+                   inputEl.closest('div[class*="drawer" i]') ||
+                   inputEl.closest('div[class*="panel" i]') ||
+                   inputEl.closest('div[class*="sidebar" i]') ||
+                   inputEl.closest('div[class*="chat" i]') ||
+                   inputEl.closest('form') ||
+                   inputEl.parentElement?.parentElement?.parentElement?.parentElement ||
+                   document.body;
 
-    if (!promptContainer) return null;
+    // 2. Query candidate buttons within or below the input in the drawer
+    const candidateElements = Array.from(drawer.querySelectorAll(
+      'button, div[role="button"], md-icon-button, mwc-icon-button'
+    ));
 
-    // 2. Query candidates strictly within promptContainer
-    const candidateSelectors = [
-      'button:not([disabled]):has(svg)',
-      'div[role="button"]:not([aria-disabled="true"]):has(svg)',
-      'button:not([disabled])[aria-label*="send" i]',
-      'button:not([disabled])[aria-label*="run" i]',
-      'button:not([disabled])[aria-label*="generate" i]',
-      'button:not([disabled])[type="submit"]',
-      'button:not([disabled])',
-      '[role="button"]:not([aria-disabled="true"])',
-      'md-icon-button:not([disabled])'
-    ];
-
-    let candidates = [];
-    for (const sel of candidateSelectors) {
-      try {
-        const els = Array.from(promptContainer.querySelectorAll(sel));
-        if (els.length > 0) candidates = candidates.concat(els);
-      } catch (e) {}
-    }
-
-    // Deduplicate candidates
-    const uniqueCandidates = Array.from(new Set(candidates));
-
-    // Filter valid action buttons
-    const validButtons = uniqueCandidates.filter(btn => {
-      if (!isElementVisible(btn)) return false;
+    const candidates = candidateElements.filter(btn => {
       if (isExcludedHeaderElement(btn)) return false;
-
       const rect = btn.getBoundingClientRect();
-      // Must be positioned near or below the prompt input, not at the top of the window!
-      if (rect.top < inputRect.top - 20) {
-        return false;
-      }
+      // Must be visible and located below or near the top of the input field
+      return rect.width > 0 && rect.height > 0 && rect.top >= inputRect.top - 25;
+    });
 
+    // 3. Filter for buttons containing an SVG (like the circular arrow icon) or action keywords
+    const validButtons = candidates.filter(btn => {
       const hasSvg = btn.querySelector('svg') !== null;
       const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
       const title = (btn.getAttribute('title') || '').toLowerCase();
@@ -441,12 +422,12 @@
         aria.includes('generate') ||
         aria.includes('submit') ||
         title.includes('send') ||
-        title.includes('generate');
+        title.includes('generate') ||
+        title.includes('run');
     });
 
     if (validButtons.length > 0) {
-      // Pick the button furthest right and bottom (highest right + bottom),
-      // which corresponds to the circular arrow button in the bottom-right of the prompt box
+      // Pick the last enabled/interactive one located at the bottom-right coordinates
       validButtons.sort((a, b) => {
         const rA = a.getBoundingClientRect();
         const rB = b.getBoundingClientRect();
