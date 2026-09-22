@@ -96,9 +96,9 @@
     const initialSnapshot = snapshotWorkspaceAssets();
     console.log(`[Flow Automator] Initial workspace assets locked: ${initialSnapshot.size} existing items.`);
 
-    // Step 4: Angular & Native Input Injection
-    console.log('[Flow Automator] Injecting prompt via Angular & Native input engine...');
-    injectAngularInputValue(promptInput, prompt);
+    // Step 4: Native Clipboard Paste Injection
+    console.log('[Flow Automator] Injecting prompt via Native Clipboard Paste...');
+    injectViaPaste(promptInput, prompt);
     await delay(400);
 
     // Step 5: Upload Character Reference Images if attached
@@ -138,64 +138,64 @@
   }
 
   /**
-   * 1. Angular & Native Input Dispatch
-   * Forces Angular FormControl update via native InputEvent simulation.
+   * 1. Native Clipboard Paste Injection
+   * Dispatches synthetic paste event with real DataTransfer payload to trigger Angular FormControl.
    */
-  function injectAngularInputValue(targetInput, promptText) {
-    if (!targetInput) return;
-    targetInput.focus();
-    targetInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    targetInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+  function injectViaPaste(element, text) {
+    if (!element) return;
+    element.focus();
+    element.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    element.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
 
-    // Clear input completely first
-    if (targetInput.isContentEditable) {
-      targetInput.innerText = '';
+    // Clear old content
+    if (element.isContentEditable) {
+      element.innerHTML = '';
     } else {
-      targetInput.value = '';
-    }
-    targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-
-    // Use InputEvent to simulate actual user typing rather than direct property assignment
-    const inputEvent = new InputEvent('input', {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      inputType: 'insertText',
-      data: promptText
-    });
-
-    if (targetInput.isContentEditable) {
-      targetInput.focus();
-      document.execCommand('selectAll', false, null);
-      let execSuccess = false;
-      try {
-        execSuccess = document.execCommand('insertText', false, promptText);
-      } catch (e) {
-        execSuccess = false;
-      }
-      if (!execSuccess) {
-        targetInput.innerText = promptText;
-      }
-    } else {
-      targetInput.value = promptText;
-
-      const prototype = targetInput.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-      const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-      if (nativeSetter) {
-        try { nativeSetter.call(targetInput, promptText); } catch (e) {}
-      }
-
-      if (targetInput._valueTracker) {
-        try { targetInput._valueTracker.setValue(promptText); } catch (e) {}
-      }
+      element.value = '';
     }
 
-    targetInput.dispatchEvent(inputEvent);
-    targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-    targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-    targetInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }));
-    targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ' ' }));
+    // Dispatch Paste Event with real DataTransfer payload
+    try {
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      const pasteEvent = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clipboardData: dt
+      });
+      element.dispatchEvent(pasteEvent);
+    } catch (e) {
+      console.warn('[Flow Automator] Paste event dispatch warning:', e);
+    }
+
+    // Fallback if paste event is cancelled or unhandled
+    const currentVal = (element.value || element.innerText || '').trim();
+    if (currentVal !== text.trim()) {
+      if (element.isContentEditable) {
+        try { document.execCommand('selectAll', false, null); } catch (e) {}
+        let execSuccess = false;
+        try { execSuccess = document.execCommand('insertText', false, text); } catch (e) {}
+        if (!execSuccess) element.innerText = text;
+      } else {
+        element.value = text;
+        const prototype = element.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        if (nativeSetter) {
+          try { nativeSetter.call(element, text); } catch (e) {}
+        }
+        if (element._valueTracker) {
+          try { element._valueTracker.setValue(text); } catch (e) {}
+        }
+      }
+    }
+
+    element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
   }
+
+  // Backward compatibility alias
+  const injectAngularInputValue = injectViaPaste;
 
   /**
    * Cleanly clear input element on retry or initialization
