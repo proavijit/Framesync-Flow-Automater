@@ -96,9 +96,9 @@
     const initialSnapshot = snapshotWorkspaceAssets();
     console.log(`[Flow Automator] Initial workspace assets locked: ${initialSnapshot.size} existing items.`);
 
-    // Step 4: Robust React 18 Input Injection
-    console.log('[Flow Automator] Injecting prompt via React 18 Value Tracker...');
-    injectReactInputValue(promptInput, prompt);
+    // Step 4: Angular & Native Input Injection
+    console.log('[Flow Automator] Injecting prompt via Angular & Native input engine...');
+    injectAngularInputValue(promptInput, prompt);
     await delay(400);
 
     // Step 5: Upload Character Reference Images if attached
@@ -138,60 +138,54 @@
   }
 
   /**
-   * 1. Robust React 18 Input Injection
-   * Bypasses React's internal _valueTracker to guarantee onChange and state updates.
+   * 1. Angular & Native Input Dispatch
+   * Directly triggers browser input engine and Angular Zone / NgModel change detection.
    */
-  function injectReactInputValue(element, text) {
-    element.focus();
-    element.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    element.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+  function injectAngularInputValue(targetInput, promptText) {
+    if (!targetInput) return;
+    targetInput.focus();
+    targetInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    targetInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
 
-    if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
-      const prototype = element.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-
-      if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(element, text);
-      } else {
-        element.value = text;
-      }
-
-      // Update React's internal _valueTracker
-      const tracker = element._valueTracker;
-      if (tracker) {
-        tracker.setValue(text);
-      }
-
-      // Dispatch comprehensive event chain for React 18
-      element.dispatchEvent(new InputEvent('beforeinput', {
-        bubbles: true,
-        cancelable: true,
-        data: text,
-        inputType: 'insertText'
-      }));
-      element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true }));
-      element.dispatchEvent(new Event('compositionend', { bubbles: true }));
-    } else if (element.isContentEditable) {
-      element.focus();
-      element.innerHTML = '';
-
+    // Select all and use input command to trigger native browser input engine
+    if (targetInput.isContentEditable) {
+      targetInput.focus();
+      document.execCommand('selectAll', false, null);
       let execSuccess = false;
       try {
-        execSuccess = document.execCommand('insertText', false, text);
+        execSuccess = document.execCommand('insertText', false, promptText);
       } catch (e) {
         execSuccess = false;
       }
-
       if (!execSuccess) {
-        element.innerHTML = text
+        targetInput.innerHTML = promptText
           .split('\n')
           .map(line => line.trim() ? `<div>${escapeHtml(line)}</div>` : '<div><br></div>')
           .join('');
       }
+      targetInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      targetInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    } else {
+      // For textarea / input
+      targetInput.value = promptText;
 
-      element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true }));
+      // Also ensure native prototype setter is called if overridden
+      const prototype = targetInput.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+      if (nativeSetter) {
+        try { nativeSetter.call(targetInput, promptText); } catch (e) {}
+      }
+
+      // Update valueTracker if present
+      if (targetInput._valueTracker) {
+        try { targetInput._valueTracker.setValue(promptText); } catch (e) {}
+      }
+
+      // Trigger standard Angular input cycle
+      targetInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      targetInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      targetInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }));
+      targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ' ' }));
     }
   }
 
@@ -202,22 +196,27 @@
     if (!element) return;
     try {
       element.focus();
-      if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+      if (element.isContentEditable) {
+        element.focus();
+        document.execCommand('selectAll', false, null);
+        document.execCommand('delete', false, null);
+        element.innerHTML = '';
+        element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      } else {
+        element.value = '';
         const prototype = element.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
         const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
         if (nativeSetter) {
-          nativeSetter.call(element, '');
-        } else {
-          element.value = '';
+          try { nativeSetter.call(element, ''); } catch (e) {}
         }
         if (element._valueTracker) {
-          element._valueTracker.setValue('');
+          try { element._valueTracker.setValue(''); } catch (e) {}
         }
-        element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-      } else if (element.isContentEditable) {
-        element.innerHTML = '';
-        element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }));
+        element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ' ' }));
       }
     } catch (e) {
       console.warn('[Flow Automator] Clear input warning:', e);
@@ -287,7 +286,7 @@
           await delay(400);
           return true;
         } else {
-          console.log('[Flow Automator] Submit arrow button found in drawer but disabled. Waiting for React state...');
+          console.log('[Flow Automator] Submit button found in drawer but disabled. Waiting for Angular state...');
         }
       }
 
@@ -396,6 +395,16 @@
                    inputEl.parentElement?.parentElement?.parentElement?.parentElement ||
                    document.body;
 
+    // Priority 1: Direct Angular Material Google Flow submit button match
+    const angularMatches = Array.from(drawer.querySelectorAll(
+      'button[aria-label*="Start generation" i], button.generate-icon-button, button[flow-icon-button], button[maticonbutton][type="submit"]'
+    ));
+    for (const btn of angularMatches) {
+      if (!isExcludedHeaderElement(btn) && isElementVisible(btn)) {
+        return btn;
+      }
+    }
+
     // 2. Query candidate buttons within or below the input in the drawer
     const candidateElements = Array.from(drawer.querySelectorAll(
       'button, div[role="button"], md-icon-button, mwc-icon-button'
@@ -414,8 +423,14 @@
       const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
       const title = (btn.getAttribute('title') || '').toLowerCase();
       const type = (btn.getAttribute('type') || '').toLowerCase();
+      const className = (typeof btn.className === 'string' ? btn.className : '').toLowerCase();
 
       return type === 'submit' ||
+        btn.hasAttribute('flow-icon-button') ||
+        btn.hasAttribute('maticonbutton') ||
+        className.includes('generate') ||
+        aria.includes('start generation') ||
+        aria.includes('generation') ||
         hasSvg ||
         aria.includes('send') ||
         aria.includes('run') ||
@@ -427,6 +442,14 @@
     });
 
     if (validButtons.length > 0) {
+      // Prioritize explicit generate / submit buttons
+      const priorityBtn = validButtons.find(b => 
+        (b.getAttribute('aria-label') || '').toLowerCase().includes('start generation') ||
+        (typeof b.className === 'string' && b.className.includes('generate')) ||
+        b.hasAttribute('flow-icon-button')
+      );
+      if (priorityBtn) return priorityBtn;
+
       // Pick the last enabled/interactive one located at the bottom-right coordinates
       validButtons.sort((a, b) => {
         const rA = a.getBoundingClientRect();
