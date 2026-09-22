@@ -1,14 +1,15 @@
 /**
  * Antigravity Flow Automator - Background Service Worker (MV3)
  * Orchestrates:
- * 1. Dedicated Full-Page Dashboard Tab lifecycle (prevents popup auto-closing).
- * 2. chrome.downloads pipeline ensuring [Folder-Name]/[tag].png with overwrite mode.
+ * 1. Dedicated Full-Page Dashboard Tab lifecycle.
+ * 2. Strict Subfolder Pipeline: ${sanitizedFolderName}/${cleanTag}.png
+ * 3. Permanent overwrite mode (conflictAction: "overwrite") to guarantee zero duplicate files.
  */
 
-console.log('[Flow Automator] Background Service Worker initialized.');
+console.log('[Flow Automator] Background Service Worker active.');
 
-// Clicking toolbar icon opens or activates the Dedicated Dashboard Tab
-chrome.action.onClicked.addListener(async (activeTab) => {
+// Clicking toolbar icon opens or focuses the Dedicated Dashboard Tab
+chrome.action.onClicked.addListener(async () => {
   const dashboardUrl = chrome.runtime.getURL('popup/popup.html');
   try {
     const existingTabs = await chrome.tabs.query({ url: dashboardUrl });
@@ -33,7 +34,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleDownload(message.payload)
       .then(downloadId => sendResponse({ success: true, downloadId }))
       .catch(err => sendResponse({ success: false, error: err.message || String(err) }));
-    return true; // Keep channel open for async response
+    return true;
   }
 
   if (message.action === 'OPEN_DASHBOARD_TAB') {
@@ -54,30 +55,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /**
  * Handle asset download pipeline:
- * Enforces folder structure: `[Folder-Name]/[tag].png`
- * Sets conflictAction: "overwrite"
+ * - Subfolder Guarantee: strictly formats file path as `${sanitizedFolderName}/${cleanTag}.png`
+ * - Permanent overwrite mode (conflictAction: "overwrite") ensures duplicate versions
+ *   (like "0-00 (1).png") are NEVER created.
  */
-async function handleDownload({ url, folder, tag, filename }) {
+async function handleDownload({ url, folder, tag }) {
   if (!url) {
     throw new Error('No image URL or data provided for download.');
   }
 
-  const cleanFolder = sanitizePathSegment(folder || 'Default-Flow');
-  const cleanTag = sanitizePathSegment(tag || 'unnamed');
+  const sanitizedFolderName = sanitizePathSegment(folder || 'Default-Flow');
+  // Strip leading '#' if present on tag and sanitize
+  const cleanTag = sanitizePathSegment(tag ? tag.replace(/^#/, '') : 'unnamed');
 
-  // Enforce .png extension strictly
-  let cleanName = filename ? sanitizeFullRelativePath(filename) : `${cleanFolder}/${cleanTag}.png`;
-  if (!cleanName.toLowerCase().endsWith('.png')) {
-    cleanName = cleanName.replace(/\.[^/.]+$/, '') + '.png';
-  }
+  // Strict format: ${sanitizedFolderName}/${cleanTag}.png
+  const targetPath = `${sanitizedFolderName}/${cleanTag}.png`;
 
-  console.log(`[Flow Automator] Initiating download: "${cleanName}"`);
+  console.log(`[Flow Automator] Subfolder pipeline triggering: "${targetPath}" [conflictAction: overwrite]`);
 
   return new Promise((resolve, reject) => {
     chrome.downloads.download({
       url: url,
-      filename: cleanName,
-      conflictAction: 'overwrite', // Prevents (1).png duplicates
+      filename: targetPath,
+      conflictAction: 'overwrite', // Permanently prevents duplicates like (1).png
       saveAs: false
     }, (downloadId) => {
       if (chrome.runtime.lastError) {
@@ -86,7 +86,7 @@ async function handleDownload({ url, folder, tag, filename }) {
       } else if (!downloadId) {
         reject(new Error('chrome.downloads.download failed to return a valid download ID.'));
       } else {
-        console.log(`[Flow Automator] Download started with ID: ${downloadId}`);
+        console.log(`[Flow Automator] Download initiated successfully [ID: ${downloadId}] -> ${targetPath}`);
         resolve(downloadId);
       }
     });
@@ -97,12 +97,7 @@ function sanitizePathSegment(segment) {
   if (!segment) return 'Default';
   return segment
     .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
-    .replace(/^\.+/, '')
-    .replace(/\.+$/, '');
-}
-
-function sanitizeFullRelativePath(fullPath) {
-  const parts = fullPath.split('/');
-  return parts.map(p => sanitizePathSegment(p)).join('/');
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') // Replace filesystem forbidden chars
+    .replace(/^\.+/, '') // Strip leading dots
+    .replace(/\.+$/, ''); // Strip trailing dots
 }

@@ -1,6 +1,8 @@
 /**
- * Antigravity Flow Automator - Dedicated Full-Page Dashboard Controller (v1.3.0)
+ * Antigravity Flow Automator - Dedicated Full-Page Dashboard Controller (v1.3.1)
  * Features:
+ * - Duplicate Blocker & State Locking (completedTags Set permanently locks finished tags)
+ * - "Retry All Failed" strictly skips items already in completedTags
  * - Dedicated Tab execution (never closes when switching tabs)
  * - Auto-detects and binds to active Google Flow tab
  * - Deep Shadow DOM project canvas detection
@@ -9,7 +11,7 @@
  * - Sequential queue execution with exponential backoff retries
  */
 
-// Queue State Machine
+// Queue State Machine with Duplicate Blocker & State Locking
 class FlowQueueManager {
   constructor() {
     this.queue = [];
@@ -18,6 +20,9 @@ class FlowQueueManager {
     this.maxRetries = 2;
     this.timeoutMs = 45000; // 45s generation timeout
     this.targetTabId = null;
+
+    // Permanent Duplicate Blocker Set
+    this.completedTags = new Set();
 
     this.stats = {
       total: 0,
@@ -46,9 +51,9 @@ class FlowQueueManager {
 
   updateStats() {
     this.stats.total = this.queue.length;
-    this.stats.pending = this.queue.filter(i => i.status === 'pending').length;
-    this.stats.success = this.queue.filter(i => i.status === 'success').length;
-    this.stats.failed = this.queue.filter(i => i.status === 'failed').length;
+    this.stats.pending = this.queue.filter(i => i.status === 'pending' && !this.completedTags.has(i.tag)).length;
+    this.stats.success = this.queue.filter(i => i.status === 'success' || this.completedTags.has(i.tag)).length;
+    this.stats.failed = this.queue.filter(i => i.status === 'failed' && !this.completedTags.has(i.tag)).length;
   }
 
   loadPrompts(parsedItems, folderName, globalAnchor, characterRules = []) {
@@ -61,6 +66,9 @@ class FlowQueueManager {
         fullPrompt = `${globalAnchor.trim()}\n${promptWithChars}`;
       }
 
+      // State Locking: if tag was already successfully downloaded in this session, lock it
+      const alreadyCompleted = this.completedTags.has(item.tag);
+
       return {
         id: `item-${idx}-${Date.now()}`,
         tag: item.tag,
@@ -69,7 +77,7 @@ class FlowQueueManager {
         detectedCharacters: expansion.detectedCharacters,
         referenceImages: expansion.referenceImages,
         folder: folderName.trim() || 'Default-Flow',
-        status: 'pending',
+        status: alreadyCompleted ? 'success' : 'pending',
         retries: 0,
         error: null,
         imageUrl: null
@@ -81,10 +89,15 @@ class FlowQueueManager {
     this.notify();
   }
 
+  /**
+   * Retry All Failed:
+   * STRICT GUARANTEE: Only resets items that are 'failed' AND NOT in completedTags.
+   * Completed tags remain permanently locked.
+   */
   retryFailedItems() {
     let resetCount = 0;
     for (const item of this.queue) {
-      if (item.status === 'failed') {
+      if (item.status === 'failed' && !this.completedTags.has(item.tag)) {
         item.status = 'pending';
         item.retries = 0;
         item.error = null;
@@ -134,16 +147,26 @@ class FlowQueueManager {
   async processNext() {
     if (this.status !== 'running') return;
 
-    const nextIdx = this.queue.findIndex(i => i.status === 'pending');
+    // Find next pending item that is NOT already completed
+    const nextIdx = this.queue.findIndex(i => i.status === 'pending' && !this.completedTags.has(i.tag));
     if (nextIdx === -1) {
       this.status = 'idle';
       this.notify();
-      this.emitLog('All queued items completed successfully!', 'success');
+      this.emitLog('All queued items completed! No pending items remaining.', 'success');
       return;
     }
 
     this.currentIndex = nextIdx;
     const currentItem = this.queue[nextIdx];
+
+    // Double-check duplicate blocker guard
+    if (this.completedTags.has(currentItem.tag)) {
+      currentItem.status = 'success';
+      this.notify();
+      this.processNext();
+      return;
+    }
+
     currentItem.status = 'generating';
     this.notify();
 
@@ -187,6 +210,9 @@ class FlowQueueManager {
           currentItem.imageUrl = response.imageUrl;
           currentItem.status = 'success';
           currentItem.error = null;
+
+          // PERMANENT STATE LOCK: Register tag in completedTags
+          this.completedTags.add(currentItem.tag);
 
           this.emitLog(`[${currentItem.tag}] Verified new render! Initiating download...`, 'success');
           await this.downloadAsset(currentItem);
@@ -241,13 +267,11 @@ class FlowQueueManager {
   }
 
   async downloadAsset(item) {
-    const filename = `${item.folder}/${item.tag}.png`;
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({
         action: 'DOWNLOAD_IMAGE',
         payload: {
           url: item.imageUrl,
-          filename: filename,
           tag: item.tag,
           folder: item.folder
         }
@@ -256,7 +280,7 @@ class FlowQueueManager {
           const err = chrome.runtime.lastError?.message || res?.error;
           this.emitLog(`[${item.tag}] Download error: ${err}`, 'error');
         } else {
-          this.emitLog(`[${item.tag}] Downloaded: ${filename}`, 'success');
+          this.emitLog(`[${item.tag}] Downloaded to ${item.folder}/${item.tag}.png [conflictAction: overwrite]`, 'success');
         }
         resolve();
       });
@@ -270,7 +294,6 @@ class FlowQueueManager {
   }
 }
 
-// Clean file name to Character Name
 export function cleanCharacterNameFromFile(fileName) {
   if (!fileName || typeof fileName !== 'string') return 'Character';
   const withoutExt = fileName.replace(/\.[^/.]+$/, '');
@@ -280,7 +303,6 @@ export function cleanCharacterNameFromFile(fileName) {
     .trim();
 }
 
-// Regex Parser for Bulk Prompts
 export function parseBulkPrompts(rawText) {
   if (!rawText || typeof rawText !== 'string') return [];
   const normalized = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -302,7 +324,6 @@ export function parseBulkPrompts(rawText) {
   return items;
 }
 
-// Dynamic Character Detection & Visual Attribute Expansion
 export function expandCharacterAttributes(rawPrompt, characterRules) {
   if (!characterRules || characterRules.length === 0) {
     return {
@@ -395,7 +416,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const queueManager = new FlowQueueManager();
   let selectedTabId = null;
 
-  // Character Profiles State
   let characterProfiles = [
     {
       id: 'char-1',
@@ -425,7 +445,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }[tag] || tag));
   }
 
-  // Target Tab Detection & Selection
   async function refreshTargetTabs() {
     targetTabSelect.innerHTML = '<option value="">Searching open tabs...</option>';
     try {
@@ -433,10 +452,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const currentTab = await chrome.tabs.getCurrent();
       const currentTabId = currentTab ? currentTab.id : null;
 
-      // Filter tabs (excluding dashboard tab)
       const validTabs = allTabs.filter(t => t.id !== currentTabId && t.url && !t.url.startsWith('chrome://'));
-
-      // Sort Flow tabs first
       const flowTabs = validTabs.filter(t => (t.url && (t.url.includes('flow.google.com') || t.url.includes('labs.google'))) || (t.title && t.title.toLowerCase().includes('flow')));
       const otherTabs = validTabs.filter(t => !flowTabs.includes(t));
       const sortedTabs = [...flowTabs, ...otherTabs];
@@ -459,7 +475,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         targetTabSelect.appendChild(opt);
       });
 
-      // Default select the first Flow tab or first available tab
       if (flowTabs.length > 0) {
         targetTabSelect.value = flowTabs[0].id;
         selectedTabId = flowTabs[0].id;
@@ -497,7 +512,6 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
         });
       } catch (pingErr) {
-        // Try dynamic injection if content script not loaded
         if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
           try {
             await chrome.scripting.executeScript({
@@ -561,7 +575,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Load Saved Data from storage
+  // Storage Persistence
   if (chrome.storage && chrome.storage.local) {
     chrome.storage.local.get(['folderName', 'characterAnchor', 'bulkPrompts', 'characterProfiles'], (result) => {
       if (result.folderName) folderInput.value = result.folderName;
@@ -595,7 +609,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // Character Cards Rendering
   function renderCharacterList() {
     characterListEl.innerHTML = '';
     charCountBadge.textContent = `${characterProfiles.length} Profile${characterProfiles.length === 1 ? '' : 's'}`;
@@ -773,7 +786,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Drag-and-drop support
   ['dragenter', 'dragover'].forEach(eventName => {
     charSection.addEventListener(eventName, (e) => {
       e.preventDefault();
@@ -930,13 +942,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.logToTerminal('Queue stopped by user.', 'error');
   });
 
+  // Retry All Failed: Guaranteed to only retry items NOT in completedTags
   btnRetryFailed.addEventListener('click', async () => {
     const count = queueManager.retryFailedItems();
     if (count > 0) {
-      window.logToTerminal(`Re-queued ${count} failed items for execution.`, 'info');
+      window.logToTerminal(`Re-queued ${count} failed items (completed tags safely locked).`, 'info');
       if (selectedTabId) {
         queueManager.start(selectedTabId);
       }
+    } else {
+      window.logToTerminal('No eligible failed items to retry. All completed items are permanently preserved.', 'info');
     }
   });
 
@@ -945,6 +960,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.logToTerminal('Logs cleared.', 'system');
   });
 
-  // Initial tab refresh
   await refreshTargetTabs();
 });

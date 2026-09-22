@@ -1,11 +1,11 @@
 /**
- * Antigravity Flow Automator - Google Flow Content Script (v1.3.0)
- * Architecture & Features:
- * - Deep Shadow DOM traversal for Google Flow web components
- * - Workspace / Project detection (alerts user if on home screen without active canvas)
- * - High-fidelity multi-line prompt insertion & reference image file slot attachment
- * - Snapshot-based render observer that NEVER downloads old or existing gallery images
- * - Hard failure if no new asset appears, preventing wrong file downloads and triggering retry
+ * Antigravity Flow Automator - Google Flow Content Script (v1.3.1)
+ * Critical Fix for Submission:
+ * - Exhaustive button locator (send/generate/submit, arrow SVGs, md-icon-button)
+ * - Proximity search starting from the input's closest parent form/container
+ * - Full synthetic KeyboardEvent dispatch (keydown, keypress, keyup, Enter keyCode 13)
+ * - Form requestSubmit fallback
+ * - Strict image snapshot observation (never downloads old/gallery assets)
  */
 
 (function () {
@@ -14,9 +14,8 @@
   }
   window.__flowAutomatorInjected = true;
 
-  console.log('[Flow Automator] Deep Content Script active.');
+  console.log('[Flow Automator] Enhanced Content Script active with robust submit triggers.');
 
-  // Runtime Message Listener
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.action) return false;
 
@@ -41,90 +40,65 @@
       handlePromptGeneration(message.payload)
         .then(result => sendResponse(result))
         .catch(err => sendResponse({ success: false, error: err.message || String(err) }));
-      return true; // Asynchronous response
+      return true;
     }
 
     return false;
   });
 
-  /**
-   * Detects whether an active Flow project editor / canvas is open
-   */
   function detectActiveProject() {
-    // 1. If an input field exists, a project is definitely open
     if (findPromptInput()) return true;
-
-    // 2. Check URL for project indicators
     const url = window.location.href.toLowerCase();
     if (url.includes('/project/') || url.includes('/canvas/') || url.includes('/edit/') || url.includes('/workspace/')) {
       return true;
     }
-
-    // 3. Check for main workspace containers
     if (querySelectorDeep('.workspace') || querySelectorDeep('.canvas-container') || querySelectorDeep('[role="main"]')) {
       return true;
     }
-
     return false;
   }
 
-  /**
-   * Main generation pipeline:
-   * 1. Validates project state.
-   * 2. Attaches reference images (if supported).
-   * 3. Locates prompt input via Deep Shadow DOM traversal.
-   * 4. Takes an absolute snapshot of all existing images.
-   * 5. Dispatches prompt and triggers generation.
-   * 6. Strictly awaits a BRAND NEW render (never downloads an old asset).
-   */
   async function handlePromptGeneration({ tag, prompt, referenceImages = [], timeoutMs = 45000 }) {
-    console.log(`[Flow Automator] Processing #${tag}. Target timeout: ${timeoutMs}ms`);
+    console.log(`[Flow Automator] Processing #${tag}. Timeout: ${timeoutMs}ms`);
 
-    // Step 1: Check Project State
-    const inputEl = findPromptInput();
-    if (!inputEl) {
-      // Check if we are on the Flow home screen
+    // Step 1: Ensure input is available
+    let promptInput = findPromptInput();
+    if (!promptInput) {
       const newProjectBtn = findNewProjectButton();
       if (newProjectBtn) {
-        console.log('[Flow Automator] Home screen detected. Attempting to click "New Project"...');
+        console.log('[Flow Automator] Clicking "New Project"...');
         newProjectBtn.click();
         await delay(2000);
       }
-
-      // Re-check after possible navigation
-      const retryInput = findPromptInput();
-      if (!retryInput) {
+      promptInput = findPromptInput();
+      if (!promptInput) {
         throw new Error('NO_PROJECT_OPEN: No active Flow Project canvas detected. Please open or create a Flow Project first.');
       }
     }
 
-    const promptInput = findPromptInput();
-    if (!promptInput) {
-      throw new Error('Could not locate Google Flow prompt input field (textarea / contenteditable / shadow DOM).');
-    }
-
-    // Step 2: Upload Character Reference Images if available
+    // Step 2: Upload Character Reference Images if attached
     if (referenceImages && referenceImages.length > 0) {
       await attemptReferenceImageUpload(referenceImages);
     }
 
-    // Step 3: STRICT SNAPSHOT of all current images on page
+    // Step 3: Strict image baseline snapshot
     const initialSnapshot = snapshotAllCurrentImages();
-    console.log(`[Flow Automator] Baseline image snapshot captured: ${initialSnapshot.size} existing assets.`);
+    console.log(`[Flow Automator] Snapshot captured: ${initialSnapshot.size} existing assets.`);
 
     // Step 4: Insert Multi-Line Prompt
     await insertMultiLinePrompt(promptInput, prompt);
     await delay(350);
 
-    // Step 5: Trigger Generation Submission
-    const submitted = triggerSubmission(promptInput);
+    // Step 5: Trigger Generation Submission (Buttons + Keyboard Enter Sequence)
+    const submitted = triggerRobustSubmission(promptInput);
     if (!submitted) {
-      throw new Error('Failed to dispatch generation submission (neither Generate button nor Enter key succeeded).');
+      throw new Error('Failed to dispatch generation submission (all submit strategies failed).');
     }
+    console.log(`[Flow Automator] Submission dispatched for #${tag}. Awaiting new render...`);
 
-    // Step 6: Wait strictly for a BRAND NEW high-res render
+    // Step 6: Await strictly NEW image render
     const newAssetUrl = await waitForBrandNewRender(initialSnapshot, timeoutMs);
-    console.log(`[Flow Automator] Verified NEW render for #${tag}: ${newAssetUrl.slice(0, 60)}...`);
+    console.log(`[Flow Automator] Detected new render for #${tag}: ${newAssetUrl.slice(0, 60)}...`);
 
     return {
       success: true,
@@ -163,9 +137,6 @@
     return results;
   }
 
-  /**
-   * Find "New Project" / "Create" button on Flow Home
-   */
   function findNewProjectButton() {
     const buttons = querySelectorAllDeep('button, a[role="button"]');
     for (const btn of buttons) {
@@ -184,9 +155,6 @@
     return null;
   }
 
-  /**
-   * Locate the active Prompt Input field across DOM and Shadow Roots
-   */
   function findPromptInput() {
     const selectors = [
       'textarea[placeholder*="prompt" i]',
@@ -223,9 +191,6 @@
     return null;
   }
 
-  /**
-   * Insert multi-line prompt text preserving newlines and framework reactivity
-   */
   async function insertMultiLinePrompt(el, text) {
     el.focus();
     await delay(100);
@@ -259,7 +224,7 @@
       }
     }
 
-    // Comprehensive synthetic event dispatch chain
+    // Comprehensive synthetic events to trigger framework reactive state
     el.dispatchEvent(new Event('focus', { bubbles: true }));
     el.dispatchEvent(new InputEvent('beforeinput', {
       bubbles: true,
@@ -269,69 +234,127 @@
     }));
     el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('compositionend', { bubbles: true }));
   }
 
   /**
-   * Trigger submission via Generate button or Enter key
+   * Robust Submit Trigger:
+   * 1. Proximity button search (closest prompt container / form / chat bar).
+   * 2. Global deep search for submit/send/generate/arrow buttons.
+   * 3. Synthetic KeyboardEvent Enter sequence (keydown, keypress, keyup).
+   * 4. Form requestSubmit() fallback.
    */
-  function triggerSubmission(inputEl) {
-    const buttonSelectors = [
-      'button[aria-label*="generate" i]',
-      'button[aria-label*="create" i]',
-      'button[aria-label*="send" i]',
-      'button[aria-label*="submit" i]',
-      'button[aria-label*="run" i]',
-      'button[title*="generate" i]',
-      'button[title*="send" i]',
-      'button[type="submit"]',
-      'button'
-    ];
+  function triggerRobustSubmission(inputEl) {
+    let triggered = false;
 
-    for (const selector of buttonSelectors) {
-      const buttons = querySelectorAllDeep(selector);
-      for (const btn of buttons) {
+    // A. Search in local proximity (closest container, form, or chat panel)
+    const container = inputEl.closest('form, div.prompt-bar, div.prompt-container, [role="form"], [class*="prompt" i], [class*="input" i]') || inputEl.parentElement;
+    if (container) {
+      const localButtons = container.querySelectorAll('button, [role="button"], md-icon-button, mwc-icon-button');
+      for (const btn of localButtons) {
         if (!isElementVisible(btn) || btn.disabled) continue;
-
-        const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-        const title = (btn.getAttribute('title') || '').toLowerCase();
-
-        if (
-          text.includes('generate') ||
-          text.includes('create') ||
-          text.includes('run') ||
-          text.includes('send') ||
-          aria.includes('generate') ||
-          aria.includes('create') ||
-          aria.includes('run') ||
-          aria.includes('send') ||
-          aria.includes('submit') ||
-          title.includes('generate') ||
-          title.includes('send')
-        ) {
-          btn.click();
-          return true;
+        if (isSubmitOrGenerateButton(btn)) {
+          console.log('[Flow Automator] Clicking local submit button in container:', btn);
+          clickButtonSafely(btn);
+          triggered = true;
+          break;
         }
       }
     }
 
-    // Dispatch Keyboard Enter
-    const enterEvents = [
-      new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }),
-      new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }),
-      new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true })
-    ];
+    // B. Global deep search if not yet triggered
+    if (!triggered) {
+      const allButtons = querySelectorAllDeep('button, [role="button"], md-icon-button, mwc-icon-button');
+      for (const btn of allButtons) {
+        if (!isElementVisible(btn) || btn.disabled) continue;
+        if (isSubmitOrGenerateButton(btn)) {
+          console.log('[Flow Automator] Clicking global submit button:', btn);
+          clickButtonSafely(btn);
+          triggered = true;
+          break;
+        }
+      }
+    }
 
-    for (const ev of enterEvents) {
-      inputEl.dispatchEvent(ev);
+    // C. Always dispatch full Keyboard Enter Sequence on the input element
+    inputEl.focus();
+    const eventParams = {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      charCode: 13,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false
+    };
+
+    inputEl.dispatchEvent(new KeyboardEvent('keydown', eventParams));
+    inputEl.dispatchEvent(new KeyboardEvent('keypress', eventParams));
+    inputEl.dispatchEvent(new KeyboardEvent('keyup', eventParams));
+    console.log('[Flow Automator] Dispatched synthetic Enter key sequence.');
+
+    // D. Form requestSubmit() fallback
+    if (inputEl.form) {
+      try {
+        if (typeof inputEl.form.requestSubmit === 'function') {
+          inputEl.form.requestSubmit();
+        } else {
+          inputEl.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        }
+      } catch (err) {
+        console.warn('[Flow Automator] form submit error:', err.message);
+      }
     }
 
     return true;
   }
 
-  /**
-   * Snapshot all existing images and canvas renders currently in the DOM
-   */
+  function isSubmitOrGenerateButton(btn) {
+    if (!btn) return false;
+    const type = (btn.getAttribute('type') || '').toLowerCase();
+    if (type === 'submit') return true;
+
+    const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+    const title = (btn.getAttribute('title') || '').toLowerCase();
+    const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+
+    // Check labels
+    const matchKeywords = ['generate', 'send', 'submit', 'run', 'create'];
+    for (const kw of matchKeywords) {
+      if (aria.includes(kw) || title.includes(kw) || text === kw) {
+        return true;
+      }
+    }
+
+    // Check SVG icons inside button (arrow-up, paper plane, send icons)
+    const svgs = btn.querySelectorAll('svg');
+    if (svgs.length > 0) {
+      for (const svg of svgs) {
+        const svgAria = (svg.getAttribute('aria-label') || '').toLowerCase();
+        if (matchKeywords.some(kw => svgAria.includes(kw))) return true;
+        // Buttons containing path or arrow icons near input
+        const path = svg.querySelector('path');
+        if (path) {
+          const d = path.getAttribute('d') || '';
+          if (d.length > 10) return true; // Likely a graphic icon like send or arrow
+        }
+      }
+    }
+
+    return false;
+  }
+
+  function clickButtonSafely(btn) {
+    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true }));
+    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, composed: true }));
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
+  }
+
   function snapshotAllCurrentImages() {
     const snapshot = new Set();
     const imgs = querySelectorAllDeep('img');
@@ -342,10 +365,6 @@
     return snapshot;
   }
 
-  /**
-   * Monitor DOM mutations and polling to detect a GENUINELY NEW high-res render.
-   * Will NEVER return an image that was in initialSnapshot.
-   */
   function waitForBrandNewRender(initialSnapshot, timeoutMs) {
     return new Promise((resolve, reject) => {
       let isResolved = false;
@@ -364,17 +383,16 @@
       const checkForNewAsset = () => {
         if (isResolved) return;
 
-        // Query all images in DOM including shadow roots
         const allImgs = querySelectorAllDeep('img').reverse();
 
         for (const img of allImgs) {
           const src = img.currentSrc || img.src;
           if (!src) continue;
 
-          // CRITICAL: Skip any image that was already present in initial snapshot
+          // Skip any asset in initial snapshot
           if (initialSnapshot.has(src)) continue;
 
-          // Skip UI avatars, icons, Google logos
+          // Skip avatars, icons, logos
           if (
             src.includes('googleusercontent.com/avatar') ||
             src.includes('gstatic.com') ||
@@ -392,7 +410,6 @@
           const isData = src.startsWith('data:image/');
           const isHttp = src.startsWith('http://') || src.startsWith('https://');
 
-          // Must be an actual rendered generation (> 160px)
           if ((isBlob || isData || isHttp) && (width >= 160 || height >= 160 || (isBlob && width === 0))) {
             if (img.complete && (img.naturalWidth > 120 || isBlob || isData)) {
               cleanup();
@@ -402,7 +419,6 @@
           }
         }
 
-        // Also check for rendered <canvas> element that updated after submission
         const canvases = querySelectorAllDeep('canvas');
         for (const canvas of canvases) {
           if (canvas.width > 250 && canvas.height > 250) {
@@ -414,17 +430,13 @@
                 return;
               }
             } catch (e) {
-              // cross-origin tainted canvas
+              // tainted canvas
             }
           }
         }
       };
 
-      // Mutation Observer targeting root and body
-      observer = new MutationObserver(() => {
-        checkForNewAsset();
-      });
-
+      observer = new MutationObserver(() => checkForNewAsset());
       observer.observe(document.body, {
         childList: true,
         subtree: true,
@@ -432,26 +444,18 @@
         attributeFilter: ['src', 'srcset', 'style', 'class']
       });
 
-      // Polling fallback every 600ms
-      pollTimer = setInterval(() => {
-        checkForNewAsset();
-      }, 600);
+      pollTimer = setInterval(() => checkForNewAsset(), 600);
 
-      // Hard Timeout: NEVER return a false positive or previous image!
       timeoutTimer = setTimeout(() => {
         cleanup();
         const elapsed = Math.round((Date.now() - startTime) / 1000);
         reject(new Error(`Timeout: No new render produced after ${elapsed}s. Generation aborted to prevent downloading stale assets.`));
       }, timeoutMs);
 
-      // Check initially in case render completed rapidly
       checkForNewAsset();
     });
   }
 
-  /**
-   * Upload character reference images to Flow file input slot
-   */
   async function attemptReferenceImageUpload(referenceImages) {
     try {
       const fileInputs = querySelectorAllDeep('input[type="file"]');
