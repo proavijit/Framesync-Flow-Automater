@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Antigravity Flow Automator</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Flow Automator</h1>
+          <span class="version-tag">v1.1.0 • Multi-Character</span>
+        </div>
+      </div>
+      <div id="tab-status" class="tab-badge disconnected">
+        <span class="status-dot"></span>
+        <span class="status-label">Checking Tab...</span>
+      </div>
+    </header>
+
+    <!-- Main Content Form -->
+    <main class="main-content">
+      <!-- General Settings Panel -->
+      <section class="config-grid">
+        <div class="form-group">
+          <label for="folder-input">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            Download Subfolder
+          </label>
+          <input 
+            type="text" 
+            id="folder-input" 
+            placeholder="e.g. Episode-01" 
+            value="Episode-01" 
+            autocomplete="off" 
+            spellcheck="false"
+          >
+          <span class="field-hint">Target: Downloads/[Folder-Name]/[tag].png</span>
+        </div>
+
+        <div class="form-group">
+          <label for="anchor-input">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="7" r="4"></circle>
+              <path d="M5.5 21a8.38 8.38 0 0 1 13 0"></path>
+            </svg>
+            Global Pre-prompt / Art Style
+          </label>
+          <textarea 
+            id="anchor-input" 
+            rows="2" 
+            placeholder="e.g. 8k render, cinematic lighting, photorealistic octane render"
+            spellcheck="false"
+          ></textarea>
+        </div>
+      </section>
+
+      <!-- Multi-Character Management & Image Reference Mapping Section -->
+      <section class="character-section">
+        <div class="section-header clickable" id="char-section-toggle">
+          <div class="title-with-badge">
+            <label>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+              Character Rules & Reference Images
+            </label>
+            <span id="char-count-badge" class="badge-pill">0 Profiles</span>
+          </div>
+          <div class="header-actions">
+            <button id="btn-add-char" class="btn-sm btn-ghost" type="button" title="Add New Character Profile">
+              + Add Character
+            </button>
+            <span class="accordion-arrow" id="char-accordion-arrow">▼</span>
+          </div>
+        </div>
+
+        <div id="character-list" class="character-list">
+          <!-- Dynamic Character Cards inserted here via popup.js -->
+        </div>
+      </section>
+
+      <!-- Bulk Prompt Ingestion -->
+      <section class="prompt-section">
+        <div class="section-header">
+          <label for="bulk-prompts">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4 17 10 11 4 5"></polyline>
+              <line x1="12" y1="19" x2="20" y2="19"></line>
+            </svg>
+            Timestamped Bulk Prompts
+          </label>
+          <button id="btn-parse" class="btn-sm btn-ghost" title="Parse and validate prompt stream">
+            Parse Stream
+          </button>
+        </div>
+        <textarea 
+          id="bulk-prompts" 
+          rows="5" 
+          placeholder="#0-00&#10;Man 01 sitting in cyber-lounge sipping glowing coffee&#10;&#10;#0-03&#10;Julian and Man 01 discussing holographic blueprint&#10;&#10;#0-06&#10;Close-up of Man 01 looking toward the neon skyline"
+          spellcheck="false"
+        ></textarea>
+      </section>
+
+      <!-- Telemetry & Live Progress Stats -->
+      <section class="stats-panel">
+        <div class="stat-card">
+          <span class="stat-title">Total</span>
+          <span id="stat-total" class="stat-val">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-title">Pending</span>
+          <span id="stat-pending" class="stat-val">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-title">Success</span>
+          <span id="stat-success" class="stat-val text-success">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-title">Failed</span>
+          <span id="stat-failed" class="stat-val text-danger">0</span>
+        </div>
+      </section>
+
+      <!-- Progress Bar & Active State -->
+      <div class="progress-container">
+        <div class="progress-meta">
+          <span id="progress-text">Ready to run</span>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress-track">
+          <div id="progress-bar" class="progress-fill" style="width: 0%;"></div>
+        </div>
+        <div class="current-item-banner" id="current-item-banner" style="display: none;">
+          <span class="spinner"></span>
+          <span class="banner-tag" id="current-tag">#0-00</span>
+          <span class="banner-text" id="current-prompt-snippet">Processing prompt...</span>
+        </div>
+      </div>
+
+      <!-- Control Buttons Action Bar -->
+      <section class="action-bar">
+        <button id="btn-start" class="btn btn-primary">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          Start Queue
+        </button>
+
+        <button id="btn-pause" class="btn btn-warning" disabled>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+          Pause
+        </button>
+
+        <button id="btn-stop" class="btn btn-danger" disabled>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="5" y="5" width="14" height="14"></rect>
+          </svg>
+          Stop
+        </button>
+
+        <button id="btn-retry-failed" class="btn btn-secondary" disabled>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="1 4 1 10 7 10"></polyline>
+            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+          </svg>
+          Retry Failed
+        </button>
+      </section>
+
+      <!-- Monospace Live Terminal Logs -->
+      <section class="terminal-section">
+        <div class="terminal-header">
+          <div class="terminal-title">
+            <span class="term-dot red"></span>
+            <span class="term-dot yellow"></span>
+            <span class="term-dot green"></span>
+            <span>Execution Terminal</span>
+          </div>
+          <button id="btn-clear-logs" class="btn-link">Clear</button>
+        </div>
+        <div id="terminal-logs" class="terminal-body">
+          <div class="log-line log-system">
+            <span class="log-time">[00:00:00]</span>
+            <span class="log-msg">Flow Automator initialized with Multi-Character Engine.</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
