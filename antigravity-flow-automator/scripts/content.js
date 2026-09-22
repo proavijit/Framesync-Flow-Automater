@@ -163,8 +163,8 @@
           .map(line => line.trim() ? `<div>${escapeHtml(line)}</div>` : '<div><br></div>')
           .join('');
       }
-      targetInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-      targetInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      targetInput.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
       // For textarea / input
       targetInput.value = promptText;
@@ -181,9 +181,9 @@
         try { targetInput._valueTracker.setValue(promptText); } catch (e) {}
       }
 
-      // Trigger standard Angular input cycle
-      targetInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-      targetInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      // Trigger standard Angular input cycle with composed: true for zone check
+      targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      targetInput.dispatchEvent(new Event('change', { bubbles: true }));
       targetInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }));
       targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ' ' }));
     }
@@ -225,20 +225,48 @@
 
   /**
    * 2. True PointerEvent & MouseEvent Dispatcher
+   * Specifically triggers Angular Material host, button, touch target, and mat-icon.
    */
   function dispatchPointerAndClick(el) {
     if (!el) return;
 
-    const targets = new Set([el]);
-    const closestBtn = el.closest('button, [role="button"], md-icon-button, mwc-icon-button');
-    if (closestBtn) targets.add(closestBtn);
-    const innerSvg = el.querySelector('svg');
-    if (innerSvg) targets.add(innerSvg);
+    const targets = new Set();
+
+    // 1. Add element itself
+    targets.add(el);
+
+    // 2. Custom Host: <flow-generate-icon-button>
+    const host = el.closest('flow-generate-icon-button') || 
+                 (el.tagName === 'FLOW-GENERATE-ICON-BUTTON' ? el : null) ||
+                 document.querySelector('flow-generate-icon-button');
+    if (host) {
+      targets.add(host);
+      host.querySelectorAll('button, .mat-mdc-button-touch-target, mat-icon, svg, span').forEach(t => targets.add(t));
+    }
+
+    // 3. Closest button
+    const closestBtn = el.closest('button, [role="button"], md-icon-button, mwc-icon-button') || 
+                       (el.tagName === 'BUTTON' ? el : null);
+    if (closestBtn) {
+      targets.add(closestBtn);
+      closestBtn.querySelectorAll('.mat-mdc-button-touch-target, mat-icon, svg, span').forEach(t => targets.add(t));
+    }
+
+    // 4. Specifically ensure Angular Material touch target & mat-icon are included
+    const touchTarget = el.querySelector?.('.mat-mdc-button-touch-target') || 
+                        closestBtn?.querySelector?.('.mat-mdc-button-touch-target') || 
+                        host?.querySelector?.('.mat-mdc-button-touch-target');
+    if (touchTarget) targets.add(touchTarget);
+
+    const matIcon = el.querySelector?.('mat-icon') || 
+                    closestBtn?.querySelector?.('mat-icon') || 
+                    host?.querySelector?.('mat-icon');
+    if (matIcon) targets.add(matIcon);
 
     for (const target of targets) {
       const rect = target.getBoundingClientRect();
-      const clientX = rect.left + rect.width / 2;
-      const clientY = rect.top + rect.height / 2;
+      const clientX = rect.left + (rect.width > 0 ? rect.width / 2 : 10);
+      const clientY = rect.top + (rect.height > 0 ? rect.height / 2 : 10);
       const eventInit = {
         bubbles: true,
         cancelable: true,
@@ -249,7 +277,7 @@
         detail: 1
       };
 
-      // Pointer sequence
+      // Pointer & Mouse Sequence
       try { target.dispatchEvent(new PointerEvent('pointerdown', eventInit)); } catch (e) {}
       try { target.dispatchEvent(new MouseEvent('mousedown', eventInit)); } catch (e) {}
       if (typeof target.focus === 'function') target.focus();
@@ -395,9 +423,19 @@
                    inputEl.parentElement?.parentElement?.parentElement?.parentElement ||
                    document.body;
 
-    // Priority 1: Direct Angular Material Google Flow submit button match
+    // Priority 1: Exact <flow-generate-icon-button> host element
+    const hostEl = drawer.querySelector('flow-generate-icon-button') || 
+                   document.querySelector('flow-generate-icon-button');
+    if (hostEl && isElementVisible(hostEl)) {
+      const btn = hostEl.querySelector('button') || hostEl;
+      if (!isExcludedHeaderElement(btn)) {
+        return btn;
+      }
+    }
+
+    // Priority 2: Direct Angular Material Google Flow submit button match
     const angularMatches = Array.from(drawer.querySelectorAll(
-      'button[aria-label*="Start generation" i], button.generate-icon-button, button[flow-icon-button], button[maticonbutton][type="submit"]'
+      'flow-generate-icon-button button, button[aria-label*="Start generation" i], button.generate-icon-button, button[flow-icon-button], button[maticonbutton][type="submit"]'
     ));
     for (const btn of angularMatches) {
       if (!isExcludedHeaderElement(btn) && isElementVisible(btn)) {
@@ -405,9 +443,20 @@
       }
     }
 
+    // Priority 3: Inner mat-icon with 'arrow_forward'
+    const matIcons = Array.from(drawer.querySelectorAll('mat-icon'));
+    for (const mi of matIcons) {
+      if ((mi.innerText || mi.textContent || '').trim().includes('arrow_forward')) {
+        const parentBtn = mi.closest('button, [role="button"], flow-generate-icon-button');
+        if (parentBtn && !isExcludedHeaderElement(parentBtn) && isElementVisible(parentBtn)) {
+          return parentBtn;
+        }
+      }
+    }
+
     // 2. Query candidate buttons within or below the input in the drawer
     const candidateElements = Array.from(drawer.querySelectorAll(
-      'button, div[role="button"], md-icon-button, mwc-icon-button'
+      'button, div[role="button"], md-icon-button, mwc-icon-button, flow-generate-icon-button'
     ));
 
     const candidates = candidateElements.filter(btn => {
@@ -420,18 +469,21 @@
     // 3. Filter for buttons containing an SVG (like the circular arrow icon) or action keywords
     const validButtons = candidates.filter(btn => {
       const hasSvg = btn.querySelector('svg') !== null;
+      const hasMatIcon = btn.querySelector('mat-icon') !== null;
       const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
       const title = (btn.getAttribute('title') || '').toLowerCase();
       const type = (btn.getAttribute('type') || '').toLowerCase();
       const className = (typeof btn.className === 'string' ? btn.className : '').toLowerCase();
 
       return type === 'submit' ||
+        btn.tagName === 'FLOW-GENERATE-ICON-BUTTON' ||
         btn.hasAttribute('flow-icon-button') ||
         btn.hasAttribute('maticonbutton') ||
         className.includes('generate') ||
         aria.includes('start generation') ||
         aria.includes('generation') ||
         hasSvg ||
+        hasMatIcon ||
         aria.includes('send') ||
         aria.includes('run') ||
         aria.includes('generate') ||
@@ -446,7 +498,8 @@
       const priorityBtn = validButtons.find(b => 
         (b.getAttribute('aria-label') || '').toLowerCase().includes('start generation') ||
         (typeof b.className === 'string' && b.className.includes('generate')) ||
-        b.hasAttribute('flow-icon-button')
+        b.hasAttribute('flow-icon-button') ||
+        b.tagName === 'FLOW-GENERATE-ICON-BUTTON'
       );
       if (priorityBtn) return priorityBtn;
 
