@@ -1,12 +1,12 @@
 /**
- * Antigravity Flow Automator - Popup Dashboard Controller (v1.2.0)
+ * Antigravity Flow Automator - Dedicated Full-Page Dashboard Controller (v1.3.0)
  * Features:
- * - Batch Import & Auto-Mapping of Character Reference Images
- * - Drag-and-Drop Image Ingestion for Instant Profile Creation
- * - Multi-Character Rules & Persistent Anchor Management
- * - Dynamic Character Attribute Expansion in Bulk Prompts
- * - Robust Regex Stream Parser with Timestamp Tagging
- * - Queue State Machine, Exponential Backoff & UI Telemetry
+ * - Dedicated Tab execution (never closes when switching tabs)
+ * - Auto-detects and binds to active Google Flow tab
+ * - Deep Shadow DOM project canvas detection
+ * - Batch Import & Drag-and-Drop character mapping
+ * - Snapshot-based generation observer with strict new-render detection
+ * - Sequential queue execution with exponential backoff retries
  */
 
 // Queue State Machine
@@ -17,7 +17,7 @@ class FlowQueueManager {
     this.status = 'idle'; // 'idle' | 'running' | 'paused' | 'stopped'
     this.maxRetries = 2;
     this.timeoutMs = 45000; // 45s generation timeout
-    this.activeTabId = null;
+    this.targetTabId = null;
 
     this.stats = {
       total: 0,
@@ -53,11 +53,9 @@ class FlowQueueManager {
 
   loadPrompts(parsedItems, folderName, globalAnchor, characterRules = []) {
     this.queue = parsedItems.map((item, idx) => {
-      // 1. Expand Character Attributes if characters are mentioned
       const expansion = expandCharacterAttributes(item.rawPrompt, characterRules);
       let promptWithChars = expansion.expandedPrompt;
 
-      // 2. Prepend Global Art Style / Anchor if present
       let fullPrompt = promptWithChars;
       if (globalAnchor && globalAnchor.trim().length > 0) {
         fullPrompt = `${globalAnchor.trim()}\n${promptWithChars}`;
@@ -126,8 +124,8 @@ class FlowQueueManager {
     this.notify();
   }
 
-  async start(activeTabId) {
-    this.activeTabId = activeTabId;
+  async start(targetTabId) {
+    this.targetTabId = targetTabId;
     this.status = 'running';
     this.notify();
     await this.processNext();
@@ -140,6 +138,7 @@ class FlowQueueManager {
     if (nextIdx === -1) {
       this.status = 'idle';
       this.notify();
+      this.emitLog('All queued items completed successfully!', 'success');
       return;
     }
 
@@ -170,10 +169,10 @@ class FlowQueueManager {
       try {
         const charCount = currentItem.detectedCharacters?.length || 0;
         const imgCount = currentItem.referenceImages?.length || 0;
-        const charDetail = charCount > 0 ? ` (Detected: ${currentItem.detectedCharacters.join(', ')} | ${imgCount} Ref Img)` : '';
+        const charDetail = charCount > 0 ? ` (Chars: ${currentItem.detectedCharacters.join(', ')} | ${imgCount} Ref Img)` : '';
         this.emitLog(`[${currentItem.tag}] Dispatching generation${charDetail}...`, 'info');
 
-        const response = await this.sendTabMessageWithTimeout(this.activeTabId, {
+        const response = await this.sendTabMessageWithTimeout(this.targetTabId, {
           action: 'GENERATE_PROMPT',
           payload: {
             tag: currentItem.tag,
@@ -181,7 +180,7 @@ class FlowQueueManager {
             referenceImages: currentItem.referenceImages || [],
             timeoutMs: this.timeoutMs
           }
-        }, this.timeoutMs + 5000);
+        }, this.timeoutMs + 6000);
 
         if (response && response.success && response.imageUrl) {
           attemptSuccess = true;
@@ -189,15 +188,21 @@ class FlowQueueManager {
           currentItem.status = 'success';
           currentItem.error = null;
 
-          this.emitLog(`[${currentItem.tag}] Render detected! Initiating download...`, 'success');
+          this.emitLog(`[${currentItem.tag}] Verified new render! Initiating download...`, 'success');
           await this.downloadAsset(currentItem);
         } else {
-          throw new Error(response?.error || 'Content script reported generation failure.');
+          const errMsg = response?.error || 'Content script reported generation failure.';
+          if (errMsg.includes('NO_PROJECT_OPEN')) {
+            this.emitLog(`[${currentItem.tag}] ERROR: No active Flow Project canvas open. Please open a project in Flow.`, 'error');
+            this.pause();
+            return;
+          }
+          throw new Error(errMsg);
         }
       } catch (err) {
         lastError = err.message || String(err);
         currentItem.retries++;
-        this.emitLog(`[${currentItem.tag}] Generation attempt ${currentItem.retries} failed: ${lastError}`, 'warn');
+        this.emitLog(`[${currentItem.tag}] Attempt ${currentItem.retries} failed: ${lastError}`, 'warn');
       }
     }
 
@@ -251,7 +256,7 @@ class FlowQueueManager {
           const err = chrome.runtime.lastError?.message || res?.error;
           this.emitLog(`[${item.tag}] Download error: ${err}`, 'error');
         } else {
-          this.emitLog(`[${item.tag}] Download initiated: ${filename}`, 'success');
+          this.emitLog(`[${item.tag}] Downloaded: ${filename}`, 'success');
         }
         resolve();
       });
@@ -268,9 +273,7 @@ class FlowQueueManager {
 // Clean file name to Character Name
 export function cleanCharacterNameFromFile(fileName) {
   if (!fileName || typeof fileName !== 'string') return 'Character';
-  // Strip extension
   const withoutExt = fileName.replace(/\.[^/.]+$/, '');
-  // Normalize delimiters (replace underscores, hyphens with space)
   return withoutExt
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -299,12 +302,7 @@ export function parseBulkPrompts(rawText) {
   return items;
 }
 
-/**
- * Dynamic Character Detection & Visual Attribute Expansion
- * Scans prompt text for registered character names (e.g. "Man 01", "Julian")
- * Appends locked visual attributes if not already expanded.
- * Maps associated reference images to the prompt item.
- */
+// Dynamic Character Detection & Visual Attribute Expansion
 export function expandCharacterAttributes(rawPrompt, characterRules) {
   if (!characterRules || characterRules.length === 0) {
     return {
@@ -357,16 +355,18 @@ export function expandCharacterAttributes(rawPrompt, characterRules) {
   };
 }
 
-// UI Controller & Character Manager
+// UI Controller & Tab Orchestrator
 document.addEventListener('DOMContentLoaded', async () => {
   const folderInput = document.getElementById('folder-input');
   const anchorInput = document.getElementById('anchor-input');
   const bulkPromptsInput = document.getElementById('bulk-prompts');
+  const targetTabSelect = document.getElementById('target-tab-select');
+  const btnRefreshTabs = document.getElementById('btn-refresh-tabs');
+  const btnOpenFlow = document.getElementById('btn-open-flow');
   const tabStatusEl = document.getElementById('tab-status');
   const tabStatusLabel = tabStatusEl.querySelector('.status-label');
 
   const charSection = document.getElementById('character-section');
-  const charSectionToggle = document.getElementById('char-section-toggle');
   const charCountBadge = document.getElementById('char-count-badge');
   const btnAddChar = document.getElementById('btn-add-char');
   const batchCharFiles = document.getElementById('batch-char-files');
@@ -393,7 +393,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const terminalLogs = document.getElementById('terminal-logs');
 
   const queueManager = new FlowQueueManager();
-  let currentActiveTab = null;
+  let selectedTabId = null;
 
   // Character Profiles State
   let characterProfiles = [
@@ -406,13 +406,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   ];
 
-  // Accordion Toggle
-  charSectionToggle.addEventListener('click', (e) => {
-    if (e.target.closest('#btn-add-char') || e.target.closest('#lbl-batch-import')) return;
-    charSection.classList.toggle('collapsed');
-  });
-
-  // Global Log function
   window.logToTerminal = (message, level = 'info') => {
     const time = new Date().toTimeString().split(' ')[0];
     const logLine = document.createElement('div');
@@ -432,7 +425,143 @@ document.addEventListener('DOMContentLoaded', async () => {
     }[tag] || tag));
   }
 
-  // Load Saved Data from chrome.storage.local
+  // Target Tab Detection & Selection
+  async function refreshTargetTabs() {
+    targetTabSelect.innerHTML = '<option value="">Searching open tabs...</option>';
+    try {
+      const allTabs = await chrome.tabs.query({});
+      const currentTab = await chrome.tabs.getCurrent();
+      const currentTabId = currentTab ? currentTab.id : null;
+
+      // Filter tabs (excluding dashboard tab)
+      const validTabs = allTabs.filter(t => t.id !== currentTabId && t.url && !t.url.startsWith('chrome://'));
+
+      // Sort Flow tabs first
+      const flowTabs = validTabs.filter(t => (t.url && (t.url.includes('flow.google.com') || t.url.includes('labs.google'))) || (t.title && t.title.toLowerCase().includes('flow')));
+      const otherTabs = validTabs.filter(t => !flowTabs.includes(t));
+      const sortedTabs = [...flowTabs, ...otherTabs];
+
+      targetTabSelect.innerHTML = '';
+      if (sortedTabs.length === 0) {
+        targetTabSelect.innerHTML = '<option value="">No open tabs found</option>';
+        setTabStatus(false, 'No Flow Tab Open');
+        selectedTabId = null;
+        return;
+      }
+
+      sortedTabs.forEach((tab) => {
+        const opt = document.createElement('option');
+        opt.value = tab.id;
+        const isFlow = flowTabs.includes(tab);
+        const prefix = isFlow ? '⭐ [Google Flow] ' : '';
+        const title = tab.title ? (tab.title.length > 40 ? tab.title.slice(0, 40) + '...' : tab.title) : 'Untitled Tab';
+        opt.textContent = `${prefix}${title}`;
+        targetTabSelect.appendChild(opt);
+      });
+
+      // Default select the first Flow tab or first available tab
+      if (flowTabs.length > 0) {
+        targetTabSelect.value = flowTabs[0].id;
+        selectedTabId = flowTabs[0].id;
+      } else {
+        targetTabSelect.value = sortedTabs[0].id;
+        selectedTabId = sortedTabs[0].id;
+      }
+
+      await verifySelectedTabConnection(selectedTabId);
+    } catch (err) {
+      console.error('Error refreshing tabs:', err);
+      setTabStatus(false, 'Tab Scan Error');
+    }
+  }
+
+  async function verifySelectedTabConnection(tabId) {
+    if (!tabId) {
+      setTabStatus(false, 'No Tab Selected');
+      return false;
+    }
+
+    try {
+      const tab = await chrome.tabs.get(Number(tabId));
+      if (!tab) {
+        setTabStatus(false, 'Invalid Tab');
+        return false;
+      }
+
+      let pingRes = null;
+      try {
+        pingRes = await new Promise((resolve, reject) => {
+          chrome.tabs.sendMessage(Number(tabId), { action: 'PING' }, (res) => {
+            if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+            else resolve(res);
+          });
+        });
+      } catch (pingErr) {
+        // Try dynamic injection if content script not loaded
+        if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: Number(tabId) },
+              files: ['scripts/content.js']
+            });
+            window.logToTerminal(`Attached Flow connector to tab: ${tab.title?.slice(0, 30)}...`, 'info');
+            pingRes = await new Promise((resolve, reject) => {
+              chrome.tabs.sendMessage(Number(tabId), { action: 'PING' }, (res) => {
+                if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+                else resolve(res);
+              });
+            });
+          } catch (injErr) {
+            setTabStatus(false, 'Injection Restricted');
+            return false;
+          }
+        }
+      }
+
+      if (pingRes && pingRes.status === 'READY') {
+        if (pingRes.isProjectOpen) {
+          setTabStatus(true, 'Flow Canvas Ready');
+        } else {
+          setTabStatus(true, 'Flow Tab (Open Project First)');
+          window.logToTerminal('Notice: Google Flow tab is open, but no active canvas project was detected. Please open or create a Flow Project.', 'warn');
+        }
+        return true;
+      } else {
+        setTabStatus(false, 'Disconnected');
+        return false;
+      }
+    } catch (err) {
+      setTabStatus(false, 'Cannot Connect');
+      return false;
+    }
+  }
+
+  function setTabStatus(connected, text) {
+    tabStatusEl.className = `tab-badge ${connected ? 'connected' : 'disconnected'}`;
+    tabStatusLabel.textContent = text;
+  }
+
+  targetTabSelect.addEventListener('change', async () => {
+    selectedTabId = targetTabSelect.value ? Number(targetTabSelect.value) : null;
+    await verifySelectedTabConnection(selectedTabId);
+  });
+
+  btnRefreshTabs.addEventListener('click', async () => {
+    await refreshTargetTabs();
+    window.logToTerminal('Refreshed open tabs list.', 'info');
+  });
+
+  btnOpenFlow.addEventListener('click', () => {
+    chrome.tabs.create({ url: 'https://flow.google.com' }, (tab) => {
+      setTimeout(async () => {
+        await refreshTargetTabs();
+        targetTabSelect.value = tab.id;
+        selectedTabId = tab.id;
+      }, 2000);
+    });
+  });
+
+  // Load Saved Data from storage
   if (chrome.storage && chrome.storage.local) {
     chrome.storage.local.get(['folderName', 'characterAnchor', 'bulkPrompts', 'characterProfiles'], (result) => {
       if (result.folderName) folderInput.value = result.folderName;
@@ -466,7 +595,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // Character Cards Rendering & Event Handling
+  // Character Cards Rendering
   function renderCharacterList() {
     characterListEl.innerHTML = '';
     charCountBadge.textContent = `${characterProfiles.length} Profile${characterProfiles.length === 1 ? '' : 's'}`;
@@ -565,7 +694,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Downscale image helper for storage efficiency
   function optimizeImageBase64(dataUrl, callback) {
     const img = new Image();
     img.onload = () => {
@@ -592,11 +720,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     img.src = dataUrl;
   }
 
-  /**
-   * Batch Process Multiple Character Images
-   * Auto-generates character profile cards from image filenames (e.g. "Man 01.png" -> "Man 01")
-   * Updates existing profile if matching name already exists, or appends a new one.
-   */
   async function processBatchCharacterFiles(fileList) {
     const files = Array.from(fileList).filter(f => f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(f.name));
     if (files.length === 0) {
@@ -604,7 +727,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    charSection.classList.remove('collapsed');
     let createdCount = 0;
     let updatedCount = 0;
 
@@ -617,9 +739,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         reader.onload = (e) => {
           const rawDataUrl = e.target.result;
           optimizeImageBase64(rawDataUrl, (optimizedDataUrl) => {
-            // Check if profile with that name already exists (case-insensitive)
             const existingChar = characterProfiles.find(c => c.name.trim().toLowerCase() === cleanName.toLowerCase());
-
             if (existingChar) {
               existingChar.imageBase64 = optimizedDataUrl;
               existingChar.imageName = file.name;
@@ -646,15 +766,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.logToTerminal(`Batch imported ${files.length} character images (${createdCount} created, ${updatedCount} updated).`, 'success');
   }
 
-  // Batch Import Button Event
   batchCharFiles.addEventListener('change', async (e) => {
     if (e.target.files && e.target.files.length > 0) {
       await processBatchCharacterFiles(e.target.files);
-      batchCharFiles.value = ''; // Reset input so same files can be re-imported if needed
+      batchCharFiles.value = '';
     }
   });
 
-  // Drag and Drop Support over Character Section
+  // Drag-and-drop support
   ['dragenter', 'dragover'].forEach(eventName => {
     charSection.addEventListener(eventName, (e) => {
       e.preventDefault();
@@ -678,10 +797,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Add Single Character Profile Action
   btnAddChar.addEventListener('click', (e) => {
     e.stopPropagation();
-    charSection.classList.remove('collapsed');
     const newId = `char-${Date.now()}`;
     const nextNum = characterProfiles.length + 1;
     characterProfiles.push({
@@ -698,63 +815,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 50);
   });
 
-  // Verify Active Tab Connection
-  async function checkActiveTab() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab || !tab.id) {
-        setTabStatus(false, 'No Active Tab');
-        return null;
-      }
-
-      currentActiveTab = tab;
-
-      try {
-        const pingRes = await new Promise((resolve, reject) => {
-          chrome.tabs.sendMessage(tab.id, { action: 'PING' }, (res) => {
-            if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-            else resolve(res);
-          });
-        });
-
-        if (pingRes && pingRes.status === 'READY') {
-          setTabStatus(true, `Flow Connected (${tab.title?.slice(0, 15) || 'Tab'}...)`);
-          return tab;
-        }
-      } catch (e) {
-        if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              files: ['scripts/content.js']
-            });
-            setTabStatus(true, 'Flow Attached');
-            window.logToTerminal('Content script injected into active tab.', 'info');
-            return tab;
-          } catch (injErr) {
-            setTabStatus(false, 'Injection Restricted');
-            window.logToTerminal(`Tab injection error: ${injErr.message}`, 'warn');
-            return null;
-          }
-        } else {
-          setTabStatus(false, 'Unsupported Page');
-          return null;
-        }
-      }
-    } catch (err) {
-      setTabStatus(false, 'Tab Check Failed');
-      return null;
-    }
-  }
-
-  function setTabStatus(connected, text) {
-    tabStatusEl.className = `tab-badge ${connected ? 'connected' : 'disconnected'}`;
-    tabStatusLabel.textContent = text;
-  }
-
-  await checkActiveTab();
-
-  // Queue State UI Synchronization
+  // Queue State UI Updates
   queueManager.onUpdate((qm) => {
     statTotal.textContent = qm.stats.total;
     statPending.textContent = qm.stats.pending;
@@ -772,7 +833,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const activeItem = qm.queue[qm.currentIndex];
       currentItemBanner.style.display = 'flex';
       currentTag.textContent = `#${activeItem.tag}`;
-      currentPromptSnippet.textContent = activeItem.fullPrompt.slice(0, 60) + '...';
+      currentPromptSnippet.textContent = activeItem.fullPrompt.slice(0, 75) + '...';
       progressText.textContent = `Processed: ${processed}/${total} | Failed: ${qm.stats.failed}`;
     } else {
       currentItemBanner.style.display = 'none';
@@ -807,7 +868,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Action: Parse Prompts
   function handleParse() {
     const raw = bulkPromptsInput.value;
     const items = parseBulkPrompts(raw);
@@ -825,20 +885,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       totalRefImagesLinked += q.referenceImages?.length || 0;
     });
 
-    window.logToTerminal(`Parsed ${items.length} prompts. Characters matched: ${totalCharsDetected}, Reference images mapped: ${totalRefImagesLinked}.`, 'success');
+    window.logToTerminal(`Parsed ${items.length} prompts. Characters matched: ${totalCharsDetected}, Ref images mapped: ${totalRefImagesLinked}.`, 'success');
     return items;
   }
 
   btnParse.addEventListener('click', handleParse);
 
-  // Action: Start
   btnStart.addEventListener('click', async () => {
-    let tab = currentActiveTab;
-    if (!tab) {
-      tab = await checkActiveTab();
+    if (!selectedTabId) {
+      await refreshTargetTabs();
     }
-    if (!tab) {
-      window.logToTerminal('Error: Cannot connect to active Google Flow tab.', 'error');
+    if (!selectedTabId) {
+      window.logToTerminal('Error: No target Google Flow tab selected. Please open Google Flow first.', 'error');
+      return;
+    }
+
+    const connected = await verifySelectedTabConnection(selectedTabId);
+    if (!connected) {
+      window.logToTerminal('Error: Cannot connect to selected tab. Ensure Google Flow is open.', 'error');
       return;
     }
 
@@ -848,10 +912,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     window.logToTerminal(`Starting queue execution for ${queueManager.queue.length} items...`, 'info');
-    queueManager.start(tab.id);
+    queueManager.start(selectedTabId);
   });
 
-  // Action: Pause / Resume
   btnPause.addEventListener('click', () => {
     if (queueManager.status === 'running') {
       queueManager.pause();
@@ -862,27 +925,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Action: Stop
   btnStop.addEventListener('click', () => {
     queueManager.stop();
     window.logToTerminal('Queue stopped by user.', 'error');
   });
 
-  // Action: Retry All Failed
   btnRetryFailed.addEventListener('click', async () => {
     const count = queueManager.retryFailedItems();
     if (count > 0) {
       window.logToTerminal(`Re-queued ${count} failed items for execution.`, 'info');
-      let tab = currentActiveTab || await checkActiveTab();
-      if (tab) {
-        queueManager.start(tab.id);
+      if (selectedTabId) {
+        queueManager.start(selectedTabId);
       }
     }
   });
 
-  // Action: Clear Logs
   btnClearLogs.addEventListener('click', () => {
     terminalLogs.innerHTML = '';
     window.logToTerminal('Logs cleared.', 'system');
   });
+
+  // Initial tab refresh
+  await refreshTargetTabs();
 });

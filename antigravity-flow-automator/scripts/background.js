@@ -1,13 +1,28 @@
 /**
  * Antigravity Flow Automator - Background Service Worker (MV3)
- * Orchestrates chrome.downloads pipeline, enforces folder path structure,
- * and sets conflictAction: "overwrite" to eliminate duplicate file artifacts.
+ * Orchestrates:
+ * 1. Dedicated Full-Page Dashboard Tab lifecycle (prevents popup auto-closing).
+ * 2. chrome.downloads pipeline ensuring [Folder-Name]/[tag].png with overwrite mode.
  */
 
-console.log('[Flow Automator] Service Worker initialized.');
+console.log('[Flow Automator] Background Service Worker initialized.');
 
-chrome.runtime.onInstalled.addListener((details) => {
-  console.log('[Flow Automator] Extension installed/updated. Reason:', details.reason);
+// Clicking toolbar icon opens or activates the Dedicated Dashboard Tab
+chrome.action.onClicked.addListener(async (activeTab) => {
+  const dashboardUrl = chrome.runtime.getURL('popup/popup.html');
+  try {
+    const existingTabs = await chrome.tabs.query({ url: dashboardUrl });
+    if (existingTabs.length > 0) {
+      await chrome.tabs.update(existingTabs[0].id, { active: true });
+      if (existingTabs[0].windowId) {
+        await chrome.windows.update(existingTabs[0].windowId, { focused: true });
+      }
+    } else {
+      await chrome.tabs.create({ url: dashboardUrl });
+    }
+  } catch (err) {
+    console.error('[Flow Automator] Failed to launch dashboard tab:', err);
+  }
 });
 
 // Runtime Message Router
@@ -19,6 +34,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then(downloadId => sendResponse({ success: true, downloadId }))
       .catch(err => sendResponse({ success: false, error: err.message || String(err) }));
     return true; // Keep channel open for async response
+  }
+
+  if (message.action === 'OPEN_DASHBOARD_TAB') {
+    const dashboardUrl = chrome.runtime.getURL('popup/popup.html');
+    chrome.tabs.create({ url: dashboardUrl }, (newTab) => {
+      sendResponse({ success: true, tabId: newTab.id });
+    });
+    return true;
   }
 
   if (message.action === 'PING_SERVICE_WORKER') {
@@ -36,24 +59,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  */
 async function handleDownload({ url, folder, tag, filename }) {
   if (!url) {
-    throw new Error('No URL or image data provided for download.');
+    throw new Error('No image URL or data provided for download.');
   }
 
-  // Sanitize folder and tag to avoid invalid filesystem characters
   const cleanFolder = sanitizePathSegment(folder || 'Default-Flow');
   const cleanTag = sanitizePathSegment(tag || 'unnamed');
-  
-  // Strict format: [Folder-Name]/[tag].png
-  const targetPath = filename && filename.includes('/')
-    ? sanitizeFullRelativePath(filename)
-    : `${cleanFolder}/${cleanTag}.png`;
 
-  console.log(`[Flow Automator] Triggering download to path: "${targetPath}"`);
+  // Enforce .png extension strictly
+  let cleanName = filename ? sanitizeFullRelativePath(filename) : `${cleanFolder}/${cleanTag}.png`;
+  if (!cleanName.toLowerCase().endsWith('.png')) {
+    cleanName = cleanName.replace(/\.[^/.]+$/, '') + '.png';
+  }
+
+  console.log(`[Flow Automator] Initiating download: "${cleanName}"`);
 
   return new Promise((resolve, reject) => {
     chrome.downloads.download({
       url: url,
-      filename: targetPath,
+      filename: cleanName,
       conflictAction: 'overwrite', // Prevents (1).png duplicates
       saveAs: false
     }, (downloadId) => {
@@ -70,16 +93,13 @@ async function handleDownload({ url, folder, tag, filename }) {
   });
 }
 
-/**
- * Sanitize path components for cross-platform filesystem safety (Windows/macOS/Linux)
- */
 function sanitizePathSegment(segment) {
   if (!segment) return 'Default';
   return segment
     .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') // Replace illegal characters with underscore
-    .replace(/^\.+/, '') // No leading dots
-    .replace(/\.+$/, ''); // No trailing dots
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/^\.+/, '')
+    .replace(/\.+$/, '');
 }
 
 function sanitizeFullRelativePath(fullPath) {

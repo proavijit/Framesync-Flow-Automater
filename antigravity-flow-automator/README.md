@@ -8,72 +8,50 @@ An enterprise-grade, production-ready Google Chrome Extension (Manifest V3) desi
 
 ```mermaid
 graph TD
-    A[Popup Dashboard] -->|Define Character Profiles & Ref Images| CM(Character Rules Engine)
-    A -->|Parse Stream / Regex| B(Queue State Machine)
-    CM -->|Dynamic Character Expansion| B
-    B -->|GENERATE_PROMPT + Ref Images| C[Content Script in Google Flow]
-    C -->|Attach Reference Images| UP[Flow Image Reference Slot]
-    C -->|Synthetic Multi-line Input| D[Flow DOM Input: textarea/contenteditable]
+    A[Dedicated Dashboard Tab] -->|Auto-Detect & Bind| B[Target Google Flow Tab]
+    A -->|Batch Import / Character Rules| CM(Character Rules Engine)
+    A -->|Parse Stream / Regex| Q(Queue State Machine)
+    CM -->|Dynamic Character Expansion| Q
+    Q -->|GENERATE_PROMPT + Ref Images| C[Deep Content Script in Flow]
+    C -->|Recursive Shadow DOM Query| D[Flow Canvas Editor Input]
+    C -->|Snapshot Existing Assets| SNAP[Baseline Asset Snapshot]
     C -->|Trigger Submit / Enter| E[Flow AI Generation Engine]
-    E -->|Renders Image / Canvas| F[MutationObserver & Poller]
-    F -->|Asset URL / Data URI| C
-    C -->|Success Response| B
-    B -->|DOWNLOAD_IMAGE| G[Background Service Worker]
+    E -->|Renders New Image| F[MutationObserver & Poller]
+    F -->|Verify NOT in Snapshot| V{Is Genuinely New?}
+    V -->|Yes: Asset URL| C
+    V -->|No: Timeout & Retry| Q
+    C -->|Success Response| Q
+    Q -->|DOWNLOAD_IMAGE| G[Background Service Worker]
     G -->|chrome.downloads.download| H["Downloads/[Folder-Name]/[tag].png"]
 ```
 
-### 1. Multi-Character Management & Image Reference Mapping
-- **Persistent Character Profiles**: Define character entities (e.g. `Man 01`, `Julian`, `Woman 02`) with locked visual descriptors (clothing, hair, face, physical characteristics).
-- **Automatic Character Detection**: The regex engine scans each timestamped prompt in the stream. When a character name is detected (e.g., `... Man 01 sitting in cyber-lounge ...`), it dynamically appends their locked visual attributes:
+### 1. Dedicated Full-Page Dashboard (Never Closes on Tab Switching)
+- Clicking the extension icon in Google Chrome launches the **Flow Automator Dashboard** in a dedicated, full-page pinned tab (`popup/popup.html`).
+- Because it runs in its own tab, background queue processing is **100% resilient** and will never be aborted or paused when switching tabs or clicking outside.
+- Features an active **Target Tab Selector** that scans open tabs, auto-detects your Google Flow tab, and displays real-time connection status (`Flow Canvas Ready` vs `Open Project First`).
+
+### 2. Deep Shadow DOM Selector & Project Canvas Detection
+- **Recursive Shadow DOM Traversal**: Google Flow utilizes modern web components with encapsulated Shadow Roots. The content script employs deep recursive querying (`querySelectorDeep` and `querySelectorAllDeep`) across all nested shadow trees to bind to prompt inputs (`textarea`, `contenteditable`, `data-slate-editor`, `role="textbox"`).
+- **Home vs Project Detection**: If the active Flow tab is on the home screen (`flow.google.com`) without an open canvas, the automator detects this, attempts to open a new project, or alerts the user in the terminal:
   ```text
-  [Character - Man 01: young adult man, short dark brown hair, slate-blue half-zip pullover, hazel eyes]
+  [WARNING] No active Flow Project canvas detected. Please open or create a Flow Project first.
   ```
-- **Image Reference Upload Slot**: Link local reference character portrait files (`.png`, `.jpg`, `.webp`) in the popup. The content script automatically detects Google Flow's image reference slot and attaches the reference images using synthetic `DataTransfer` file objects.
-- **Graceful Fallback**: If an interface does not support direct image upload slots, the system logs a notice and relies on the enriched visual prompt keywords injected directly into the input box.
 
-### 2. High-Fidelity Multi-Line DOM Input
-- Multi-line prompts with locked attributes and global art direction are inserted into `textarea` and `contenteditable` elements with native prototype setter bypasses and full synthetic event dispatch (`focus`, `beforeinput`, `input`, `change`).
-- Prevents whitespace collapsing or carriage return truncation.
+### 3. Strict Snapshot Image Detection (Zero Wrong or Stale Image Downloads)
+- Before submitting each generation, the content script takes a **strict baseline snapshot** of all existing `img` URLs and canvas renders.
+- The `MutationObserver` specifically verifies that candidate render URLs were **NOT** present in the initial snapshot, filters out UI avatars and Google icons, and verifies completion (`naturalWidth > 120`).
+- If no new render is produced within the timeout window (45s), the system **aborts with a hard timeout instead of grabbing an old image**, allowing the queue manager to trigger an automatic retry with exponential backoff (2s, 4s).
 
-### 3. Bulk Ingestion & Parsing Engine
-- **Regex Pattern**:
-  ```regex
-  /#(\d+-\d+)\s*\n([\s\S]*?)(?=(?:\n#\d+-\d+|$))/g
-  ```
-- **Global Pre-prompt**: Automatically prepends global styles (e.g., `8k resolution, cinematic lighting, photorealistic`) to every prompt.
-- **Chronological File Pipeline**: Formatted strictly as:
+### 4. Multi-Character Management & Batch Reference Images
+- **Batch Import**: Click **"Batch Import"** or drag-and-drop multiple character portrait files (`Man 01.png`, `Julian.jpg`, `Woman 02.jpeg`). The engine auto-cleans the filenames into Character Keys and maps their reference portraits.
+- **Dynamic Attribute Expansion**: Automatically injects locked visual attributes (hair, outfit, physique) into the prompt when character names are detected, preventing duplicate injection.
+- **Reference Image Slot Upload**: Automatically detects Flow's reference image file slot and attaches character portraits via synthetic `DataTransfer` file objects.
+- **Chronological Download Pipeline**: Formatted strictly as:
   ```text
   Downloads/[Folder-Name]/[tag].png
   ```
   *(e.g., `Episode-01/0-00.png`, `Episode-01/0-03.png`, `Episode-01/0-06.png`)*
-- **Duplicate Prevention**: Configured with `conflictAction: "overwrite"` to prevent duplicate filename artifacts like `0-00 (1).png`.
-
-### 4. Resilience, Queue Management & Fault-Tolerance
-- **Central State Queue**: Manages states: `Pending`, `Generating`, `Success`, `Failed`.
-- **Exponential Backoff**: Timeout (45s) automatically retries up to 2 times with exponential backoff (2s, 4s) before marking as `Failed`.
-- **"Retry All Failed"**: Re-dispatches only failed jobs without reprocessing completed items.
-- **Storage Persistence**: Character definitions, reference images, folder targets, and prompt streams persist across popup reopens via `chrome.storage.local`.
-
----
-
-## Directory Layout
-
-```
-antigravity-flow-automator/
-├── manifest.json              # Manifest V3 config with activeTab, downloads, storage, scripting
-├── icons/                     # Extension branding icons (16px, 48px, 128px)
-│   ├── icon16.png
-│   ├── icon48.png
-│   └── icon128.png
-├── popup/
-│   ├── popup.html             # Dark-mode dashboard with Character Manager, stats & terminal
-│   ├── popup.css              # Responsive dark-mode styling with monospace logs
-│   └── popup.js               # Regex parser, Character Rules engine, queue dispatcher
-├── scripts/
-│   ├── content.js             # Flow DOM connector, multi-line input, image upload & MutationObserver
-│   └── background.js          # Service worker managing chrome.downloads pipeline
-└── README.md                  # Comprehensive operational documentation
-```
+- Configured with `conflictAction: "overwrite"` to prevent duplicate filename artifacts like `0-00 (1).png`.
 
 ---
 
@@ -84,56 +62,11 @@ antigravity-flow-automator/
    chrome://extensions
    ```
 2. **Enable Developer Mode**: Toggle the switch in the top-right corner.
-3. Click **"Load unpacked"**.
-4. Select the directory:
+3. Click **"Load unpacked"** and select:
    ```text
-   c:\Users\avijit\Desktop\Framesync Flow\antigravity-flow-automator
+   antigravity-flow-automator
    ```
-5. Pin **Antigravity Flow Automator** to your Chrome toolbar.
-
----
-
-## Operational Guide: Multi-Character Workflow
-
-### 1. Setup Character Rules & Reference Images
-1. Click the **Flow Automator** extension icon.
-2. In the **Character Rules & Reference Images** section, click **+ Add Character**.
-3. Set the character name (e.g. `Man 01`).
-4. Enter locked visual attributes:
-   ```text
-   young adult man, short dark brown hair, slate-blue half-zip pullover, hazel eyes
-   ```
-5. Click **Link Image** to attach reference character art (e.g. `Man 01.png`).
-
-### 2. Enter Timestamped Bulk Prompts
-Enter your continuous prompt stream:
-
-```text
-#0-00
-Wide shot of Man 01 sitting in cyber-lounge sipping glowing coffee
-
-#0-03
-Julian and Man 01 discussing holographic blueprint over metallic table
-
-#0-06
-Extreme close-up on Man 01 observing the neon cityscape
-```
-
-### 3. Parse & Run
-1. Click **Parse Stream**. Notice the terminal log confirms:
-   `Parsed 3 prompts. Characters matched: 4, Reference images mapped: 3.`
-2. Click **Start Queue**.
-3. Flow Automator will sequentially:
-   - Attach character reference images to the platform.
-   - Inject the full multi-line prompt including character locks and art style.
-   - Trigger generation.
-   - Detect the completed render via `MutationObserver`.
-   - Download the file into `Downloads/[Folder-Name]/[tag].png`.
-
----
-
-## Troubleshooting
-
-- **Character not detected**: Ensure the name in the prompt matches the Character Rule name (case-insensitive word boundary matching).
-- **Reference image upload**: If Flow updates its file upload interface, the content script automatically falls back to full visual prompt expansion.
-- **Download folder**: Ensure Chrome's setting "Ask where to save each file before downloading" is unchecked for automatic downloading.
+4. Click the **Flow Automator** extension icon on your toolbar. It will open the full-page **Dedicated Dashboard**.
+5. Open **Google Flow** (`https://flow.google.com`) in another tab and open or create a project canvas.
+6. The dashboard will show **⭐ [Google Flow] Flow Canvas Ready**.
+7. Paste your prompts, configure characters, and click **Start Queue**.

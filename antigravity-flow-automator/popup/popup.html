@@ -3,228 +3,276 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Antigravity Flow Automator</title>
+  <title>Flow Automator Dashboard</title>
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
-  <div class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="brand">
-        <div class="logo-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+<body class="dashboard-body">
+  <div class="dashboard-container">
+    <!-- Top Global Header -->
+    <header class="dashboard-header">
+      <div class="header-left">
+        <div class="brand-logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
           </svg>
         </div>
-        <div class="brand-text">
-          <h1>Flow Automator</h1>
-          <span class="version-tag">v1.2.0 • Batch Import</span>
+        <div class="brand-info">
+          <h1>Flow Automator Dashboard</h1>
+          <span class="version-tag">v1.3.0 • Dedicated Full-Page Workspace</span>
         </div>
       </div>
-      <div id="tab-status" class="tab-badge disconnected">
-        <span class="status-dot"></span>
-        <span class="status-label">Checking Tab...</span>
+
+      <!-- Target Google Flow Tab Selector -->
+      <div class="tab-target-bar">
+        <div class="target-select-wrapper">
+          <label for="target-tab-select">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            Target Tab:
+          </label>
+          <select id="target-tab-select" class="tab-dropdown">
+            <option value="">Searching for Google Flow tabs...</option>
+          </select>
+          <button id="btn-refresh-tabs" class="btn-icon" title="Refresh open tabs list" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+          </button>
+        </div>
+
+        <button id="btn-open-flow" class="btn-sm btn-ghost" type="button" title="Launch new Google Flow tab">
+          🔗 Open Google Flow
+        </button>
+
+        <div id="tab-status" class="tab-badge disconnected">
+          <span class="status-dot"></span>
+          <span class="status-label">Checking Tab...</span>
+        </div>
       </div>
     </header>
 
-    <!-- Main Content Form -->
-    <main class="main-content">
-      <!-- General Settings Panel -->
-      <section class="config-grid">
-        <div class="form-group">
-          <label for="folder-input">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-            </svg>
-            Download Subfolder
-          </label>
-          <input 
-            type="text" 
-            id="folder-input" 
-            placeholder="e.g. Episode-01" 
-            value="Episode-01" 
-            autocomplete="off" 
-            spellcheck="false"
-          >
-          <span class="field-hint">Target: Downloads/[Folder-Name]/[tag].png</span>
-        </div>
-
-        <div class="form-group">
-          <label for="anchor-input">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="7" r="4"></circle>
-              <path d="M5.5 21a8.38 8.38 0 0 1 13 0"></path>
-            </svg>
-            Global Pre-prompt / Art Style
-          </label>
-          <textarea 
-            id="anchor-input" 
-            rows="2" 
-            placeholder="e.g. 8k render, cinematic lighting, photorealistic octane render"
-            spellcheck="false"
-          ></textarea>
-        </div>
-      </section>
-
-      <!-- Multi-Character Management & Batch Reference Images -->
-      <section class="character-section" id="character-section">
-        <div class="section-header clickable" id="char-section-toggle">
-          <div class="title-with-badge">
-            <label>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                <circle cx="9" cy="7" r="4"></circle>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+    <!-- Main 2-Column Responsive Workspace Grid -->
+    <main class="dashboard-grid">
+      <!-- LEFT COLUMN: Configurations, Character Rules & Reference Assets -->
+      <div class="col-left">
+        <!-- Download & Pre-prompt Settings Card -->
+        <section class="card config-card">
+          <div class="card-header">
+            <h2>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
               </svg>
-              Character Rules & Reference Images
-            </label>
-            <span id="char-count-badge" class="badge-pill">0 Profiles</span>
+              Pipeline Routing
+            </h2>
           </div>
-          <div class="header-actions">
-            <!-- Batch Import Button -->
-            <label class="btn-sm btn-accent file-btn" id="lbl-batch-import" title="Batch Import Multiple Character Images">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="17 8 12 3 7 8"></polyline>
-                <line x1="12" y1="3" x2="12" y2="15"></line>
-              </svg>
-              Batch Import
-              <input type="file" id="batch-char-files" multiple accept="image/*" style="display: none;">
-            </label>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="folder-input">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                Download Subfolder
+              </label>
+              <input 
+                type="text" 
+                id="folder-input" 
+                placeholder="e.g. Episode-01" 
+                value="Episode-01" 
+                autocomplete="off" 
+                spellcheck="false"
+              >
+              <span class="field-hint">Target: Downloads/[Folder-Name]/[tag].png</span>
+            </div>
 
-            <!-- Manual Add Character Button -->
-            <button id="btn-add-char" class="btn-sm btn-ghost" type="button" title="Add Single Character Profile">
-              + Add
-            </button>
-            <span class="accordion-arrow" id="char-accordion-arrow">▼</span>
+            <div class="form-group">
+              <label for="anchor-input">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="7" r="4"></circle>
+                  <path d="M5.5 21a8.38 8.38 0 0 1 13 0"></path>
+                </svg>
+                Global Art Style / Core Anchor
+              </label>
+              <textarea 
+                id="anchor-input" 
+                rows="2" 
+                placeholder="e.g. 8k resolution, cinematic lighting, photorealistic octane render"
+                spellcheck="false"
+              ></textarea>
+            </div>
           </div>
-        </div>
+        </section>
 
-        <!-- Drag and Drop Dropzone Highlight -->
-        <div class="dropzone-banner" id="dropzone-banner">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
-            <path d="M12 12v9"></path>
-            <path d="m8 16 4-4 4 4"></path>
-          </svg>
-          <span>Drop character images here to auto-generate profiles</span>
-        </div>
+        <!-- Multi-Character Management Card -->
+        <section class="card character-card-panel" id="character-section">
+          <div class="card-header flex-between">
+            <div class="title-with-badge">
+              <h2>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="9" cy="7" r="4"></circle>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+                Character Rules & Reference Images
+              </h2>
+              <span id="char-count-badge" class="badge-pill">0 Profiles</span>
+            </div>
+            <div class="header-actions">
+              <!-- Batch Import Button -->
+              <label class="btn-sm btn-accent file-btn" id="lbl-batch-import" title="Batch Import Character Images from Folder">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Batch Import
+                <input type="file" id="batch-char-files" multiple accept="image/*" style="display: none;">
+              </label>
 
-        <div id="character-list" class="character-list">
-          <!-- Dynamic Character Cards inserted here via popup.js -->
-        </div>
-      </section>
+              <!-- Single Add Button -->
+              <button id="btn-add-char" class="btn-sm btn-ghost" type="button" title="Add Single Character Profile">
+                + Add
+              </button>
+            </div>
+          </div>
 
-      <!-- Bulk Prompt Ingestion -->
-      <section class="prompt-section">
-        <div class="section-header">
-          <label for="bulk-prompts">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="4 17 10 11 4 5"></polyline>
-              <line x1="12" y1="19" x2="20" y2="19"></line>
+          <!-- Drag and Drop Dropzone -->
+          <div class="dropzone-banner" id="dropzone-banner">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
+              <path d="M12 12v9"></path>
+              <path d="m8 16 4-4 4 4"></path>
             </svg>
-            Timestamped Bulk Prompts
-          </label>
-          <button id="btn-parse" class="btn-sm btn-ghost" title="Parse and validate prompt stream">
-            Parse Stream
-          </button>
-        </div>
-        <textarea 
-          id="bulk-prompts" 
-          rows="5" 
-          placeholder="#0-00&#10;Man 01 sitting in cyber-lounge sipping glowing coffee&#10;&#10;#0-03&#10;Julian and Man 01 discussing holographic blueprint&#10;&#10;#0-06&#10;Close-up of Man 01 looking toward the neon skyline"
-          spellcheck="false"
-        ></textarea>
-      </section>
+            <span>Drop character portrait images here to auto-generate profiles</span>
+          </div>
 
-      <!-- Telemetry & Live Progress Stats -->
-      <section class="stats-panel">
-        <div class="stat-card">
-          <span class="stat-title">Total</span>
-          <span id="stat-total" class="stat-val">0</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-title">Pending</span>
-          <span id="stat-pending" class="stat-val">0</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-title">Success</span>
-          <span id="stat-success" class="stat-val text-success">0</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-title">Failed</span>
-          <span id="stat-failed" class="stat-val text-danger">0</span>
-        </div>
-      </section>
-
-      <!-- Progress Bar & Active State -->
-      <div class="progress-container">
-        <div class="progress-meta">
-          <span id="progress-text">Ready to run</span>
-          <span id="progress-percent">0%</span>
-        </div>
-        <div class="progress-track">
-          <div id="progress-bar" class="progress-fill" style="width: 0%;"></div>
-        </div>
-        <div class="current-item-banner" id="current-item-banner" style="display: none;">
-          <span class="spinner"></span>
-          <span class="banner-tag" id="current-tag">#0-00</span>
-          <span class="banner-text" id="current-prompt-snippet">Processing prompt...</span>
-        </div>
+          <!-- Dynamic Character List -->
+          <div id="character-list" class="character-list">
+            <!-- Rendered dynamically by popup.js -->
+          </div>
+        </section>
       </div>
 
-      <!-- Control Buttons Action Bar -->
-      <section class="action-bar">
-        <button id="btn-start" class="btn btn-primary">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-          Start Queue
-        </button>
-
-        <button id="btn-pause" class="btn btn-warning" disabled>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="4" width="4" height="16"></rect>
-            <rect x="14" y="4" width="4" height="16"></rect>
-          </svg>
-          Pause
-        </button>
-
-        <button id="btn-stop" class="btn btn-danger" disabled>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="5" y="5" width="14" height="14"></rect>
-          </svg>
-          Stop
-        </button>
-
-        <button id="btn-retry-failed" class="btn btn-secondary" disabled>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="1 4 1 10 7 10"></polyline>
-            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-          </svg>
-          Retry Failed
-        </button>
-      </section>
-
-      <!-- Monospace Live Terminal Logs -->
-      <section class="terminal-section">
-        <div class="terminal-header">
-          <div class="terminal-title">
-            <span class="term-dot red"></span>
-            <span class="term-dot yellow"></span>
-            <span class="term-dot green"></span>
-            <span>Execution Terminal</span>
+      <!-- RIGHT COLUMN: Bulk Prompts, Queue Execution, Telemetry & Terminal -->
+      <div class="col-right">
+        <!-- Bulk Prompt Ingestion Card -->
+        <section class="card prompt-card">
+          <div class="card-header flex-between">
+            <h2>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+              Timestamped Bulk Prompt Stream
+            </h2>
+            <button id="btn-parse" class="btn-sm btn-ghost" title="Parse and validate prompt stream">
+              ⚡ Parse Stream
+            </button>
           </div>
-          <button id="btn-clear-logs" class="btn-link">Clear</button>
-        </div>
-        <div id="terminal-logs" class="terminal-body">
-          <div class="log-line log-system">
-            <span class="log-time">[00:00:00]</span>
-            <span class="log-msg">Flow Automator ready. Use Batch Import or drag images to map characters.</span>
+          <div class="card-body">
+            <textarea 
+              id="bulk-prompts" 
+              rows="8" 
+              placeholder="#0-00&#10;Man 01 sitting in cyber-lounge sipping glowing coffee&#10;&#10;#0-03&#10;Julian and Man 01 discussing holographic blueprint over metallic table&#10;&#10;#0-06&#10;Extreme close-up of Man 01 looking out at the neon skyline"
+              spellcheck="false"
+            ></textarea>
+          </div>
+        </section>
+
+        <!-- Telemetry & Live Progress Stats -->
+        <section class="stats-panel">
+          <div class="stat-card">
+            <span class="stat-title">Total</span>
+            <span id="stat-total" class="stat-val">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">Pending</span>
+            <span id="stat-pending" class="stat-val">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">Success</span>
+            <span id="stat-success" class="stat-val text-success">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-title">Failed</span>
+            <span id="stat-failed" class="stat-val text-danger">0</span>
+          </div>
+        </section>
+
+        <!-- Progress Bar & Active State Banner -->
+        <div class="progress-container">
+          <div class="progress-meta">
+            <span id="progress-text">Ready to run</span>
+            <span id="progress-percent">0%</span>
+          </div>
+          <div class="progress-track">
+            <div id="progress-bar" class="progress-fill" style="width: 0%;"></div>
+          </div>
+          <div class="current-item-banner" id="current-item-banner" style="display: none;">
+            <span class="spinner"></span>
+            <span class="banner-tag" id="current-tag">#0-00</span>
+            <span class="banner-text" id="current-prompt-snippet">Processing prompt...</span>
           </div>
         </div>
-      </section>
+
+        <!-- Queue Action Buttons -->
+        <section class="action-bar">
+          <button id="btn-start" class="btn btn-primary">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            Start Queue
+          </button>
+
+          <button id="btn-pause" class="btn btn-warning" disabled>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16"></rect>
+              <rect x="14" y="4" width="4" height="16"></rect>
+            </svg>
+            Pause
+          </button>
+
+          <button id="btn-stop" class="btn btn-danger" disabled>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="5" y="5" width="14" height="14"></rect>
+            </svg>
+            Stop
+          </button>
+
+          <button id="btn-retry-failed" class="btn btn-secondary" disabled>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="1 4 1 10 7 10"></polyline>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+            </svg>
+            Retry Failed
+          </button>
+        </section>
+
+        <!-- Monospace Live Execution Terminal -->
+        <section class="terminal-section">
+          <div class="terminal-header">
+            <div class="terminal-title">
+              <span class="term-dot red"></span>
+              <span class="term-dot yellow"></span>
+              <span class="term-dot green"></span>
+              <span>Flow Execution Terminal</span>
+            </div>
+            <button id="btn-clear-logs" class="btn-link">Clear</button>
+          </div>
+          <div id="terminal-logs" class="terminal-body">
+            <div class="log-line log-system">
+              <span class="log-time">[00:00:00]</span>
+              <span class="log-msg">Dedicated Dashboard active. Queue executes seamlessly in the background.</span>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
   </div>
 
