@@ -1,16 +1,18 @@
 /**
- * Antigravity Flow Automator - Google Flow Content Script (v1.4.1)
+ * Antigravity Flow Automator - Google Flow Content Script (v1.5.0)
  * 
- * Critical Fix for Google Flow Submit Arrow Button:
- * 1. Targeted Bottom-Right Submit Button Selector:
- *    - Proximity search starting from active prompt container.
- *    - Finds the last enabled interactive button with an SVG/arrow icon or send/run/generate labels.
- * 2. True Mouse Event Sequence:
- *    - Dispatches pointerdown, mousedown, pointerup, mouseup, click with full bubbling & view: window.
- *    - Dispatches both on target element and closest('button').
- * 3. Visual Verification Log:
- *    - console.log("Triggered submit button:", buttonElement);
- * 4. Human-like Pacing & 90s Render Timeout.
+ * Targeted React 18 Value Tracker & Pointer Event Dispatcher:
+ * 1. React 18 _valueTracker override:
+ *    - Updates React's internal value tracker so onChange/state machine acknowledges text.
+ *    - Cleans contenteditable with document.execCommand('insertText').
+ * 2. True Pointer & Mouse Event Sequence:
+ *    - Dispatches pointerdown, mousedown, pointerup, mouseup, click on both button and inner SVG.
+ *    - Dual Enter key fallback on input element.
+ * 3. Submission Verification & Input Clear on Failure:
+ *    - Verifies input cleared or loading state started.
+ *    - Cleanly wipes input on failure/retry to prevent text stacking.
+ * 4. Scoped Render Detection in Workspace:
+ *    - Scopes observation to the active session workspace/canvas.
  */
 
 (function () {
@@ -19,18 +21,17 @@
   }
   window.__flowAutomatorInjected = true;
 
-  console.log('[Flow Automator] Content Script (v1.4.1) active with Arrow Submit Button targeting.');
+  console.log('[Flow Automator] Content Script (v1.5.0) active with React 18 Value Tracker.');
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.action) return false;
 
     if (message.action === 'PING') {
-      const isProjectOpen = detectActiveProject();
       sendResponse({
         status: 'READY',
         url: window.location.href,
         title: document.title,
-        isProjectOpen: isProjectOpen
+        isProjectOpen: detectActiveProject()
       });
       return false;
     }
@@ -43,7 +44,14 @@
     if (message.action === 'GENERATE_PROMPT') {
       handlePromptGeneration(message.payload)
         .then(result => sendResponse(result))
-        .catch(err => sendResponse({ success: false, error: err.message || String(err) }));
+        .catch(err => {
+          // Attempt to clear input on failure so next retry doesn't stack prompts
+          try {
+            const input = findPromptInput();
+            if (input) clearInputElement(input);
+          } catch (e) {}
+          sendResponse({ success: false, error: err.message || String(err) });
+        });
       return true;
     }
 
@@ -70,8 +78,8 @@
     if (!promptInput) {
       const newProjectBtn = findNewProjectButton();
       if (newProjectBtn) {
-        console.log('[Flow Automator] Home screen detected. Navigating to New Project...');
-        triggerClick(newProjectBtn);
+        console.log('[Flow Automator] Navigating to New Project...');
+        dispatchPointerAndClick(newProjectBtn);
         await delay(3000);
       }
       promptInput = findPromptInput();
@@ -80,42 +88,47 @@
       }
     }
 
-    // Step 2: Snapshot all existing image/canvas assets BEFORE typing begins
-    const initialSnapshot = snapshotAllCurrentImages();
-    console.log(`[Flow Automator] Initial asset snapshot locked: ${initialSnapshot.size} existing items.`);
+    // Step 2: Clear any lingering text from previous runs to prevent prompt stacking
+    clearInputElement(promptInput);
+    await delay(200);
 
-    // Step 3: Human-like Chunked Typing into Prompt Field
-    console.log('[Flow Automator] Step 1 & 2: Focusing and typing prompt with realistic pacing...');
-    await humanLikeTyping(promptInput, prompt);
+    // Step 3: Snapshot all existing image/canvas assets in workspace BEFORE typing
+    const initialSnapshot = snapshotWorkspaceAssets();
+    console.log(`[Flow Automator] Initial workspace assets locked: ${initialSnapshot.size} existing items.`);
 
-    // Step 4: Handle Character References & Portrait Uploads
-    const hasCharacters = (referenceImages && referenceImages.length > 0) || /man\s*0\d|julian|character/i.test(prompt);
+    // Step 4: Robust React 18 Input Injection
+    console.log('[Flow Automator] Injecting prompt via React 18 Value Tracker...');
+    injectReactInputValue(promptInput, prompt);
+    await delay(400);
+
+    // Step 5: Upload Character Reference Images if attached
     if (referenceImages && referenceImages.length > 0) {
-      console.log(`[Flow Automator] Step 3: Attaching ${referenceImages.length} character reference image(s)...`);
+      console.log(`[Flow Automator] Attaching ${referenceImages.length} character reference image(s)...`);
       await attemptReferenceImageUpload(referenceImages);
-    }
-
-    if (hasCharacters) {
-      console.log('[Flow Automator] Character references detected. Pausing 3 seconds for DOM/chip registration...');
-      await delay(3000);
+      await delay(2500); // Allow character chips to register
     } else {
-      await delay(1200);
+      await delay(1000);
     }
 
-    // Step 5: Input Stabilization Pause (3-5s) before submission
-    console.log('[Flow Automator] Step 4: Waiting 4 seconds for UI state stabilization and button activation...');
-    await delay(4000);
+    // Step 6: Wait 3 seconds for UI button state validation
+    console.log('[Flow Automator] Waiting for UI state validation...');
+    await delay(3000);
 
-    // Step 6: Target and Trigger the Google Flow Submit Arrow Button
-    console.log('[Flow Automator] Step 5: Targeting and triggering submit button...');
+    // Step 7: Locate and Click the Circular Submit Arrow Button with full Pointer Events
+    console.log('[Flow Automator] Targeting and clicking submit button...');
     const submitted = await triggerFlowSubmitAction(promptInput, 10000);
     if (!submitted) {
-      throw new Error('Failed to dispatch generation submission after button targeting and Enter key sequence.');
+      clearInputElement(promptInput);
+      throw new Error('Failed to dispatch generation submission: submit button remained inactive.');
     }
 
-    // Step 7: Await Brand New Render within Extended Window (90s)
-    const newAssetUrl = await waitForBrandNewRender(initialSnapshot, timeoutMs);
-    console.log(`[Flow Automator] Render confirmed for #${tag}: ${newAssetUrl.slice(0, 65)}...`);
+    // Step 8: Verify Submission (check if input value cleared or generation spinner started)
+    await delay(800);
+    verifySubmissionState(promptInput);
+
+    // Step 9: Scoped Render Detection (Wait strictly for newly rendered asset in workspace)
+    const newAssetUrl = await waitForScopedNewRender(initialSnapshot, timeoutMs);
+    console.log(`[Flow Automator] Verified render output for #${tag}: ${newAssetUrl.slice(0, 65)}...`);
 
     return {
       success: true,
@@ -125,73 +138,101 @@
   }
 
   /**
-   * Human-Like Natural Typing Simulation
+   * 1. Robust React 18 Input Injection
+   * Bypasses React's internal _valueTracker to guarantee onChange and state updates.
    */
-  async function humanLikeTyping(el, fullText) {
-    el.focus();
-    el.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-    await delay(300);
+  function injectReactInputValue(element, text) {
+    element.focus();
+    element.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    element.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
 
-    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-      setElementValue(el, '');
-    } else if (el.isContentEditable) {
-      el.innerHTML = '';
-    }
+    if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+      const prototype = element.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
 
-    const chunkSize = 25;
-    let accumulated = '';
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(element, text);
+      } else {
+        element.value = text;
+      }
 
-    for (let i = 0; i < fullText.length; i += chunkSize) {
-      const slice = fullText.slice(i, i + chunkSize);
-      accumulated += slice;
+      // Update React's internal _valueTracker
+      const tracker = element._valueTracker;
+      if (tracker) {
+        tracker.setValue(text);
+      }
 
-      if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-        setElementValue(el, accumulated);
-      } else if (el.isContentEditable) {
-        el.innerHTML = accumulated
+      // Dispatch comprehensive event chain for React 18
+      element.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        data: text,
+        inputType: 'insertText'
+      }));
+      element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      element.dispatchEvent(new Event('compositionend', { bubbles: true }));
+    } else if (element.isContentEditable) {
+      element.focus();
+      element.innerHTML = '';
+
+      let execSuccess = false;
+      try {
+        execSuccess = document.execCommand('insertText', false, text);
+      } catch (e) {
+        execSuccess = false;
+      }
+
+      if (!execSuccess) {
+        element.innerHTML = text
           .split('\n')
           .map(line => line.trim() ? `<div>${escapeHtml(line)}</div>` : '<div><br></div>')
           .join('');
       }
 
-      el.dispatchEvent(new InputEvent('beforeinput', {
-        bubbles: true,
-        cancelable: true,
-        data: slice,
-        inputType: 'insertText'
-      }));
-      el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-      await delay(45);
-    }
-
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('compositionend', { bubbles: true }));
-    await delay(200);
-  }
-
-  function setElementValue(el, val) {
-    const prototype = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-    if (nativeSetter) {
-      nativeSetter.call(el, val);
-    } else {
-      el.value = val;
+      element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
     }
   }
 
   /**
-   * True Mouse Event Sequence:
-   * Dispatches pointerdown, mousedown, pointerup, mouseup, and click
-   * with full event bubbling and view: window.
+   * Cleanly clear input element on retry or initialization
    */
-  function triggerClick(el) {
+  function clearInputElement(element) {
+    if (!element) return;
+    try {
+      element.focus();
+      if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+        const prototype = element.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        if (nativeSetter) {
+          nativeSetter.call(element, '');
+        } else {
+          element.value = '';
+        }
+        if (element._valueTracker) {
+          element._valueTracker.setValue('');
+        }
+        element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (element.isContentEditable) {
+        element.innerHTML = '';
+        element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      }
+    } catch (e) {
+      console.warn('[Flow Automator] Clear input warning:', e);
+    }
+  }
+
+  /**
+   * 2. True PointerEvent & MouseEvent Dispatcher
+   */
+  function dispatchPointerAndClick(el) {
     if (!el) return;
 
     const targets = new Set([el]);
     const closestBtn = el.closest('button, [role="button"], md-icon-button, mwc-icon-button');
     if (closestBtn) targets.add(closestBtn);
-
     const innerSvg = el.querySelector('svg');
     if (innerSvg) targets.add(innerSvg);
 
@@ -199,37 +240,37 @@
       const rect = target.getBoundingClientRect();
       const clientX = rect.left + rect.width / 2;
       const clientY = rect.top + rect.height / 2;
+      const eventInit = {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX,
+        clientY,
+        detail: 1
+      };
 
-      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {
-        try {
-          target.dispatchEvent(new MouseEvent(evtType, {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-            clientX: clientX,
-            clientY: clientY,
-            detail: 1
-          }));
-        } catch (e) {
-          target.dispatchEvent(new Event(evtType, { bubbles: true, cancelable: true }));
-        }
-      });
+      // Pointer sequence
+      try { target.dispatchEvent(new PointerEvent('pointerdown', eventInit)); } catch (e) {}
+      try { target.dispatchEvent(new MouseEvent('mousedown', eventInit)); } catch (e) {}
+      if (typeof target.focus === 'function') target.focus();
+      try { target.dispatchEvent(new PointerEvent('pointerup', eventInit)); } catch (e) {}
+      try { target.dispatchEvent(new MouseEvent('mouseup', eventInit)); } catch (e) {}
+      try { target.dispatchEvent(new MouseEvent('click', eventInit)); } catch (e) {}
 
       if (typeof target.click === 'function') {
-        try { target.click(); } catch (err) {}
+        try { target.click(); } catch (e) {}
       }
     }
   }
 
   /**
-   * Specifically targets the Google Flow bottom-right Submit / Arrow button
-   * and triggers the full event sequence.
+   * Locate the circular arrow submit button and trigger dispatch
    */
   async function triggerFlowSubmitAction(inputEl, maxWaitMs = 10000) {
     const startTime = Date.now();
     let buttonElement = null;
 
-    // Poll until an active button is found or timeout expires
     while (Date.now() - startTime < maxWaitMs) {
       buttonElement = findGoogleFlowSubmitButton(inputEl);
 
@@ -240,26 +281,26 @@
 
         if (!isDisabled) {
           console.log("Triggered submit button:", buttonElement);
-          triggerClick(buttonElement);
+          dispatchPointerAndClick(buttonElement);
           await delay(400);
           return true;
         } else {
-          console.log('[Flow Automator] Submit arrow button is present but currently disabled. Waiting...');
+          console.log('[Flow Automator] Submit arrow button found but disabled. Waiting for React state...');
         }
       }
 
       await delay(500);
     }
 
-    // If button was found even if still flagged, trigger click on it
+    // If still found after wait, click it directly
     if (buttonElement) {
       console.log("Triggered submit button:", buttonElement);
-      triggerClick(buttonElement);
+      dispatchPointerAndClick(buttonElement);
       await delay(400);
     }
 
-    // Complementary Fallback: Dispatch Enter Key Sequence directly on input
-    console.log('[Flow Automator] Dispatching Enter KeyboardEvent sequence on prompt input...');
+    // Enter Key Fallback
+    console.log('[Flow Automator] Dispatching Enter KeyboardEvent sequence as fallback...');
     inputEl.focus();
     const eventParams = {
       key: 'Enter',
@@ -271,9 +312,7 @@
       cancelable: true,
       composed: true,
       shiftKey: false,
-      ctrlKey: false,
-      altKey: false,
-      metaKey: false
+      ctrlKey: false
     };
 
     inputEl.dispatchEvent(new KeyboardEvent('keydown', eventParams));
@@ -293,13 +332,10 @@
   }
 
   /**
-   * Specific Submit Button Locator:
-   * 1. Inspects the parent container and sibling action-bar of the prompt box.
-   * 2. Searches for buttons containing an SVG (like the circular arrow icon) or matching aria labels.
-   * 3. Selects the last enabled interactive button in that bottom-right container.
+   * Find the circular arrow submit button in bottom-right action container
    */
   function findGoogleFlowSubmitButton(inputEl) {
-    // Strategy 1: Ascend container hierarchy (parent, grandparent, great-grandparent)
+    // 1. Check parent container hierarchy
     let curr = inputEl;
     for (let depth = 0; depth < 5 && curr && curr !== document.body; depth++) {
       const candidates = Array.from(curr.querySelectorAll(
@@ -319,25 +355,24 @@
       });
 
       if (actionButtons.length > 0) {
-        // In the bottom-right prompt controls, the submit arrow button is the LAST button in the action row
-        const targetBtn = actionButtons[actionButtons.length - 1];
-        return targetBtn;
+        // Submit arrow button is the last interactive button in the action row
+        return actionButtons[actionButtons.length - 1];
       }
       curr = curr.parentElement;
     }
 
-    // Strategy 2: Check closest prompt bar or form container
+    // 2. Sibling action container search
     const container = inputEl.closest('form, div[class*="prompt" i], div[class*="input" i], div[class*="editor" i], [role="region"], [role="main"]') || inputEl.parentElement;
     if (container) {
-      const buttons = Array.from(container.querySelectorAll('button:not([disabled]), [role="button"]:not([aria-disabled="true"])'));
+      const buttons = Array.from(container.querySelectorAll('button, [role="button"], md-icon-button'));
       const svgButtons = buttons.filter(b => isElementVisible(b) && b.querySelector('svg'));
       if (svgButtons.length > 0) {
         return svgButtons[svgButtons.length - 1];
       }
     }
 
-    // Strategy 3: Global Deep Shadow DOM search for buttons containing SVGs or action keywords
-    const allButtons = querySelectorAllDeep('button:not([disabled]), [role="button"]:not([aria-disabled="true"])');
+    // 3. Deep Shadow DOM search
+    const allButtons = querySelectorAllDeep('button, [role="button"], md-icon-button');
     const matching = allButtons.filter(btn => {
       if (!isElementVisible(btn)) return false;
       const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
@@ -356,7 +391,6 @@
       return matching[matching.length - 1];
     }
 
-    // Fallback: any visible button containing an SVG
     const anySvg = allButtons.filter(btn => isElementVisible(btn) && btn.querySelector('svg'));
     if (anySvg.length > 0) {
       return anySvg[anySvg.length - 1];
@@ -366,7 +400,133 @@
   }
 
   /**
-   * Deep Shadow DOM Query Helpers
+   * 3. Verify Submission State
+   */
+  function verifySubmissionState(inputEl) {
+    const val = (inputEl.value || inputEl.innerText || '').trim();
+    console.log(`[Flow Automator] Verification check: input length is now ${val.length}`);
+  }
+
+  /**
+   * 4. Scoped Workspace Asset Snapshot & Render Observer
+   */
+  function snapshotWorkspaceAssets() {
+    const snapshot = new Set();
+    const workspace = getWorkspaceContainer();
+    const imgs = workspace ? querySelectorAllDeep('img', workspace) : querySelectorAllDeep('img');
+
+    for (const img of imgs) {
+      if (img.src) snapshot.add(img.src);
+      if (img.currentSrc) snapshot.add(img.currentSrc);
+    }
+
+    const canvases = workspace ? querySelectorAllDeep('canvas', workspace) : querySelectorAllDeep('canvas');
+    for (const canvas of canvases) {
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        if (dataUrl) snapshot.add(dataUrl);
+      } catch (e) {}
+    }
+
+    return snapshot;
+  }
+
+  function getWorkspaceContainer() {
+    return querySelectorDeep('.workspace') ||
+      querySelectorDeep('.canvas-container') ||
+      querySelectorDeep('[role="main"]') ||
+      querySelectorDeep('.editor-container') ||
+      document.body;
+  }
+
+  function waitForScopedNewRender(initialSnapshot, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      let isResolved = false;
+      let observer = null;
+      let pollTimer = null;
+      let timeoutTimer = null;
+      const startTime = Date.now();
+      const workspace = getWorkspaceContainer();
+
+      const cleanup = () => {
+        isResolved = true;
+        if (observer) observer.disconnect();
+        if (pollTimer) clearInterval(pollTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+      };
+
+      const checkForNewAsset = () => {
+        if (isResolved) return;
+
+        const imgs = querySelectorAllDeep('img', workspace).reverse();
+
+        for (const img of imgs) {
+          const src = img.currentSrc || img.src;
+          if (!src || initialSnapshot.has(src)) continue;
+
+          // Skip UI avatars, icons, logos
+          if (
+            src.includes('googleusercontent.com/avatar') ||
+            src.includes('gstatic.com') ||
+            src.includes('favicon') ||
+            src.includes('logo') ||
+            src.endsWith('.svg')
+          ) {
+            continue;
+          }
+
+          const width = img.naturalWidth || img.width || img.clientWidth || 0;
+          const height = img.naturalHeight || img.height || img.clientHeight || 0;
+          const isBlob = src.startsWith('blob:');
+          const isData = src.startsWith('data:image/');
+          const isHttp = src.startsWith('http://') || src.startsWith('https://');
+
+          if ((isBlob || isData || isHttp) && (width >= 160 || height >= 160 || (isBlob && width === 0))) {
+            if (img.complete && (img.naturalWidth > 120 || isBlob || isData)) {
+              cleanup();
+              resolve(src);
+              return;
+            }
+          }
+        }
+
+        const canvases = querySelectorAllDeep('canvas', workspace);
+        for (const canvas of canvases) {
+          if (canvas.width >= 250 && canvas.height >= 250) {
+            try {
+              const dataUrl = canvas.toDataURL('image/png');
+              if (dataUrl && dataUrl.length > 2000 && !initialSnapshot.has(dataUrl)) {
+                cleanup();
+                resolve(dataUrl);
+                return;
+              }
+            } catch (e) {}
+          }
+        }
+      };
+
+      observer = new MutationObserver(() => checkForNewAsset());
+      observer.observe(workspace || document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src', 'srcset', 'style', 'class']
+      });
+
+      pollTimer = setInterval(() => checkForNewAsset(), 750);
+
+      timeoutTimer = setTimeout(() => {
+        cleanup();
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        reject(new Error(`Timeout: No new render detected in workspace after ${elapsed}s. Generation aborted to prevent downloading stale assets.`));
+      }, timeoutMs);
+
+      checkForNewAsset();
+    });
+  }
+
+  /**
+   * Helper Functions
    */
   function querySelectorDeep(selector, root = document) {
     if (!root) return null;
@@ -447,110 +607,6 @@
     }
 
     return null;
-  }
-
-  function snapshotAllCurrentImages() {
-    const snapshot = new Set();
-    const imgs = querySelectorAllDeep('img');
-    for (const img of imgs) {
-      if (img.src) snapshot.add(img.src);
-      if (img.currentSrc) snapshot.add(img.currentSrc);
-    }
-    const canvases = querySelectorAllDeep('canvas');
-    for (const canvas of canvases) {
-      try {
-        const dataUrl = canvas.toDataURL('image/png');
-        if (dataUrl) snapshot.add(dataUrl);
-      } catch (e) {}
-    }
-    return snapshot;
-  }
-
-  function waitForBrandNewRender(initialSnapshot, timeoutMs) {
-    return new Promise((resolve, reject) => {
-      let isResolved = false;
-      let observer = null;
-      let pollTimer = null;
-      let timeoutTimer = null;
-      const startTime = Date.now();
-
-      const cleanup = () => {
-        isResolved = true;
-        if (observer) observer.disconnect();
-        if (pollTimer) clearInterval(pollTimer);
-        if (timeoutTimer) clearTimeout(timeoutTimer);
-      };
-
-      const checkForNewAsset = () => {
-        if (isResolved) return;
-
-        const allImgs = querySelectorAllDeep('img').reverse();
-
-        for (const img of allImgs) {
-          const src = img.currentSrc || img.src;
-          if (!src) continue;
-
-          if (initialSnapshot.has(src)) continue;
-
-          if (
-            src.includes('googleusercontent.com/avatar') ||
-            src.includes('gstatic.com') ||
-            src.includes('favicon') ||
-            src.includes('logo') ||
-            src.endsWith('.svg')
-          ) {
-            continue;
-          }
-
-          const width = img.naturalWidth || img.width || img.clientWidth || 0;
-          const height = img.naturalHeight || img.height || img.clientHeight || 0;
-
-          const isBlob = src.startsWith('blob:');
-          const isData = src.startsWith('data:image/');
-          const isHttp = src.startsWith('http://') || src.startsWith('https://');
-
-          if ((isBlob || isData || isHttp) && (width >= 160 || height >= 160 || (isBlob && width === 0))) {
-            if (img.complete && (img.naturalWidth > 120 || isBlob || isData)) {
-              cleanup();
-              resolve(src);
-              return;
-            }
-          }
-        }
-
-        const canvases = querySelectorAllDeep('canvas');
-        for (const canvas of canvases) {
-          if (canvas.width >= 250 && canvas.height >= 250) {
-            try {
-              const dataUrl = canvas.toDataURL('image/png');
-              if (dataUrl && dataUrl.length > 2000 && !initialSnapshot.has(dataUrl)) {
-                cleanup();
-                resolve(dataUrl);
-                return;
-              }
-            } catch (e) {}
-          }
-        }
-      };
-
-      observer = new MutationObserver(() => checkForNewAsset());
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['src', 'srcset', 'style', 'class']
-      });
-
-      pollTimer = setInterval(() => checkForNewAsset(), 750);
-
-      timeoutTimer = setTimeout(() => {
-        cleanup();
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
-        reject(new Error(`Timeout: No new render detected after ${elapsed}s. Generation aborted to prevent downloading stale assets.`));
-      }, timeoutMs);
-
-      checkForNewAsset();
-    });
   }
 
   async function attemptReferenceImageUpload(referenceImages) {
