@@ -18,7 +18,7 @@
         </div>
         <div class="brand-text">
           <h1>Flow Automator</h1>
-          <span class="version-tag">v1.1.0 • Multi-Character</span>
+          <span class="version-tag">v1.2.0 • Batch Import</span>
         </div>
       </div>
       <div id="tab-status" class="tab-badge disconnected">
@@ -66,8 +66,8 @@
         </div>
       </section>
 
-      <!-- Multi-Character Management & Image Reference Mapping Section -->
-      <section class="character-section">
+      <!-- Multi-Character Management & Batch Reference Images -->
+      <section class="character-section" id="character-section">
         <div class="section-header clickable" id="char-section-toggle">
           <div class="title-with-badge">
             <label>
@@ -82,11 +82,33 @@
             <span id="char-count-badge" class="badge-pill">0 Profiles</span>
           </div>
           <div class="header-actions">
-            <button id="btn-add-char" class="btn-sm btn-ghost" type="button" title="Add New Character Profile">
-              + Add Character
+            <!-- Batch Import Button -->
+            <label class="btn-sm btn-accent file-btn" id="lbl-batch-import" title="Batch Import Multiple Character Images">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              Batch Import
+              <input type="file" id="batch-char-files" multiple accept="image/*" style="display: none;">
+            </label>
+
+            <!-- Manual Add Character Button -->
+            <button id="btn-add-char" class="btn-sm btn-ghost" type="button" title="Add Single Character Profile">
+              + Add
             </button>
             <span class="accordion-arrow" id="char-accordion-arrow">▼</span>
           </div>
+        </div>
+
+        <!-- Drag and Drop Dropzone Highlight -->
+        <div class="dropzone-banner" id="dropzone-banner">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
+            <path d="M12 12v9"></path>
+            <path d="m8 16 4-4 4 4"></path>
+          </svg>
+          <span>Drop character images here to auto-generate profiles</span>
         </div>
 
         <div id="character-list" class="character-list">
@@ -199,7 +221,7 @@
         <div id="terminal-logs" class="terminal-body">
           <div class="log-line log-system">
             <span class="log-time">[00:00:00]</span>
-            <span class="log-msg">Flow Automator initialized with Multi-Character Engine.</span>
+            <span class="log-msg">Flow Automator ready. Use Batch Import or drag images to map characters.</span>
           </div>
         </div>
       </section>

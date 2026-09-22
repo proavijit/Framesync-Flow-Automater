@@ -1,8 +1,9 @@
 /**
- * Antigravity Flow Automator - Popup Dashboard Controller (v1.1.0)
+ * Antigravity Flow Automator - Popup Dashboard Controller (v1.2.0)
  * Features:
+ * - Batch Import & Auto-Mapping of Character Reference Images
+ * - Drag-and-Drop Image Ingestion for Instant Profile Creation
  * - Multi-Character Rules & Persistent Anchor Management
- * - Image Reference Mapping with Base64 Conversion
  * - Dynamic Character Attribute Expansion in Bulk Prompts
  * - Robust Regex Stream Parser with Timestamp Tagging
  * - Queue State Machine, Exponential Backoff & UI Telemetry
@@ -264,6 +265,18 @@ class FlowQueueManager {
   }
 }
 
+// Clean file name to Character Name
+export function cleanCharacterNameFromFile(fileName) {
+  if (!fileName || typeof fileName !== 'string') return 'Character';
+  // Strip extension
+  const withoutExt = fileName.replace(/\.[^/.]+$/, '');
+  // Normalize delimiters (replace underscores, hyphens with space)
+  return withoutExt
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Regex Parser for Bulk Prompts
 export function parseBulkPrompts(rawText) {
   if (!rawText || typeof rawText !== 'string') return [];
@@ -309,9 +322,7 @@ export function expandCharacterAttributes(rawPrompt, characterRules) {
     if (!char.name || !char.name.trim()) continue;
 
     const trimmedName = char.name.trim();
-    // Escape special regex chars in character name
     const escapedName = trimmedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Word boundary matching (allowing spaces or hyphens)
     const nameRegex = new RegExp(`\\b${escapedName}\\b`, 'i');
 
     if (nameRegex.test(rawPrompt)) {
@@ -319,7 +330,6 @@ export function expandCharacterAttributes(rawPrompt, characterRules) {
 
       if (char.attributes && char.attributes.trim()) {
         const trimmedAttrs = char.attributes.trim();
-        // Only append if the attributes are not already present in the prompt text
         if (!rawPrompt.toLowerCase().includes(trimmedAttrs.toLowerCase())) {
           attributeAppendList.push(`[Character - ${trimmedName}: ${trimmedAttrs}]`);
         }
@@ -355,10 +365,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const tabStatusEl = document.getElementById('tab-status');
   const tabStatusLabel = tabStatusEl.querySelector('.status-label');
 
-  const charSection = document.querySelector('.character-section');
+  const charSection = document.getElementById('character-section');
   const charSectionToggle = document.getElementById('char-section-toggle');
   const charCountBadge = document.getElementById('char-count-badge');
   const btnAddChar = document.getElementById('btn-add-char');
+  const batchCharFiles = document.getElementById('batch-char-files');
   const characterListEl = document.getElementById('character-list');
 
   const btnParse = document.getElementById('btn-parse');
@@ -397,8 +408,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Accordion Toggle
   charSectionToggle.addEventListener('click', (e) => {
-    // Don't toggle if clicking "+ Add Character" button directly
-    if (e.target.closest('#btn-add-char')) return;
+    if (e.target.closest('#btn-add-char') || e.target.closest('#lbl-batch-import')) return;
     charSection.classList.toggle('collapsed');
   });
 
@@ -461,7 +471,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     characterListEl.innerHTML = '';
     charCountBadge.textContent = `${characterProfiles.length} Profile${characterProfiles.length === 1 ? '' : 's'}`;
 
-    characterProfiles.forEach((char, idx) => {
+    characterProfiles.forEach((char) => {
       const card = document.createElement('div');
       card.className = 'character-card';
       card.dataset.id = char.id;
@@ -502,7 +512,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       `;
 
-      // Inputs Listeners
       const nameInput = card.querySelector('.char-name-input');
       const attrInput = card.querySelector('.char-attributes-input');
       const fileInput = card.querySelector('.char-file-input');
@@ -541,13 +550,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const reader = new FileReader();
         reader.onload = (readEvent) => {
           const rawDataUrl = readEvent.target.result;
-          // Downscale large image to prevent exceeding chrome storage limits
           optimizeImageBase64(rawDataUrl, (optimizedDataUrl) => {
             char.imageBase64 = optimizedDataUrl;
             char.imageName = file.name;
             renderCharacterList();
             persistCharacters();
-            window.logToTerminal(`Linked reference image "${file.name}" to character "${char.name}".`, 'info');
+            window.logToTerminal(`Linked reference image "${file.name}" to "${char.name}".`, 'info');
           });
         };
         reader.readAsDataURL(file);
@@ -584,7 +592,93 @@ document.addEventListener('DOMContentLoaded', async () => {
     img.src = dataUrl;
   }
 
-  // Add Character Profile Action
+  /**
+   * Batch Process Multiple Character Images
+   * Auto-generates character profile cards from image filenames (e.g. "Man 01.png" -> "Man 01")
+   * Updates existing profile if matching name already exists, or appends a new one.
+   */
+  async function processBatchCharacterFiles(fileList) {
+    const files = Array.from(fileList).filter(f => f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(f.name));
+    if (files.length === 0) {
+      window.logToTerminal('No valid image files found in selection.', 'warn');
+      return;
+    }
+
+    charSection.classList.remove('collapsed');
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const cleanName = cleanCharacterNameFromFile(file.name);
+
+      await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const rawDataUrl = e.target.result;
+          optimizeImageBase64(rawDataUrl, (optimizedDataUrl) => {
+            // Check if profile with that name already exists (case-insensitive)
+            const existingChar = characterProfiles.find(c => c.name.trim().toLowerCase() === cleanName.toLowerCase());
+
+            if (existingChar) {
+              existingChar.imageBase64 = optimizedDataUrl;
+              existingChar.imageName = file.name;
+              updatedCount++;
+            } else {
+              characterProfiles.push({
+                id: `char-${Date.now()}-${i}`,
+                name: cleanName,
+                attributes: '',
+                imageBase64: optimizedDataUrl,
+                imageName: file.name
+              });
+              createdCount++;
+            }
+            resolve();
+          });
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    renderCharacterList();
+    persistCharacters();
+    window.logToTerminal(`Batch imported ${files.length} character images (${createdCount} created, ${updatedCount} updated).`, 'success');
+  }
+
+  // Batch Import Button Event
+  batchCharFiles.addEventListener('change', async (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      await processBatchCharacterFiles(e.target.files);
+      batchCharFiles.value = ''; // Reset input so same files can be re-imported if needed
+    }
+  });
+
+  // Drag and Drop Support over Character Section
+  ['dragenter', 'dragover'].forEach(eventName => {
+    charSection.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      charSection.classList.add('drag-active');
+    }, false);
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    charSection.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      charSection.classList.remove('drag-active');
+    }, false);
+  });
+
+  charSection.addEventListener('drop', async (e) => {
+    const dt = e.dataTransfer;
+    if (dt && dt.files && dt.files.length > 0) {
+      await processBatchCharacterFiles(dt.files);
+    }
+  });
+
+  // Add Single Character Profile Action
   btnAddChar.addEventListener('click', (e) => {
     e.stopPropagation();
     charSection.classList.remove('collapsed');
@@ -599,7 +693,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     renderCharacterList();
     persistCharacters();
-    // Scroll to new card
     setTimeout(() => {
       characterListEl.scrollTop = characterListEl.scrollHeight;
     }, 50);
