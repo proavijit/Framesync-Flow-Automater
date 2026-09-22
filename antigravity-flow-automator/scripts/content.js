@@ -114,9 +114,9 @@
     console.log('[Flow Automator] Waiting for UI state validation...');
     await delay(3000);
 
-    // Step 7: Locate and Click the Circular Submit Arrow Button with full Pointer Events
+    // Step 7: Locate and Click the Circular Submit Arrow Button with full Pointer Events & MAIN World Execution
     console.log('[Flow Automator] Targeting and clicking submit button...');
-    const submitted = await triggerFlowSubmitAction(promptInput, 10000);
+    const submitted = await triggerFlowSubmitAction(promptInput, 10000, prompt);
     if (!submitted) {
       clearInputElement(promptInput);
       throw new Error('Failed to dispatch generation submission: submit button remained inactive.');
@@ -300,9 +300,69 @@
   }
 
   /**
-   * Dispatches Angular Form Submission via Enter key sequence, native form.requestSubmit(), and pointer click.
+   * Execute function directly in the page's MAIN world context
+   * Bypasses Chrome extension ISOLATED world event boundaries so Angular Zone.js detects events natively.
    */
-  async function triggerFlowSubmitAction(targetInput, maxWaitMs = 10000) {
+  function executeInPageContext(fn, data) {
+    try {
+      const script = document.createElement('script');
+      script.textContent = `(${fn.toString()})(${JSON.stringify(data)});`;
+      (document.head || document.documentElement).appendChild(script);
+      script.remove();
+      return true;
+    } catch (e) {
+      console.warn('[Flow Automator] executeInPageContext error:', e);
+      return false;
+    }
+  }
+
+  function submitFlowPrompt(promptText) {
+    executeInPageContext((text) => {
+      // Locate input inside Angular app
+      const input = document.querySelector('textarea, [contenteditable="true"]');
+      if (!input) return;
+
+      input.focus();
+      if (input.isContentEditable) {
+        input.innerText = text;
+      } else {
+        input.value = text;
+      }
+
+      // Dispatch real input event in page context
+      input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+
+      // Locate and submit form
+      const btn = document.querySelector('button[aria-label="Start generation"]') || 
+                  document.querySelector('button.generate-icon-button') ||
+                  document.querySelector('flow-generate-icon-button button') ||
+                  document.querySelector('flow-generate-icon-button');
+      
+      const touchArea = document.querySelector('flow-generate-icon-button .mat-mdc-button-touch-target') ||
+                        (btn ? btn.querySelector?.('.mat-mdc-button-touch-target') : null);
+
+      const form = input.closest('form') || (btn ? btn.closest('form') : null);
+
+      if (form && typeof form.requestSubmit === 'function') {
+        try {
+          form.requestSubmit();
+        } catch (e) {
+          if (touchArea) touchArea.click();
+          else if (btn) btn.click();
+        }
+      } else if (touchArea) {
+        touchArea.click();
+      } else if (btn) {
+        btn.click();
+      }
+    }, promptText);
+  }
+
+  /**
+   * Dispatches Angular Form Submission via MAIN World script injection, Enter key sequence, native form.requestSubmit(), and pointer click.
+   */
+  async function triggerFlowSubmitAction(targetInput, maxWaitMs = 10000, promptText = '') {
     const startTime = Date.now();
     let buttonElement = null;
 
@@ -325,7 +385,14 @@
       await delay(500);
     }
 
-    // 1. Target the enclosing <form> directly
+    const textToSubmit = promptText || targetInput.value || targetInput.innerText || '';
+
+    // Step A: Primary Execution - Execute in Page's MAIN World to bypass ISOLATED world isTrusted restrictions
+    console.log("[Flow Automator] Executing submission in page MAIN world context...");
+    submitFlowPrompt(textToSubmit);
+    await delay(200);
+
+    // 1. Target the enclosing <form> directly in isolated world as well
     let form = targetInput.closest('form') || targetInput.form;
     if (!form) {
       try {
@@ -347,13 +414,8 @@
                       document.querySelector('button[aria-label*="Start generation" i]') ||
                       document.querySelector('flow-generate-icon-button button');
 
-    console.log("[Flow Automator] Executing Angular Form submission sequence...");
-
-    // Step A: Focus input
+    // Step B: Focus input & Keyboard Enter Submission (Google Flow Chat Engine)
     targetInput.focus();
-    await delay(50);
-
-    // Step B: Keyboard Enter Submission (Google Flow Chat Engine)
     const triggerEnter = (el) => {
       const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
       el.dispatchEvent(new KeyboardEvent('keydown', opts));
