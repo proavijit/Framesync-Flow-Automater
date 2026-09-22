@@ -292,15 +292,15 @@
   }
 
   /**
-   * Locate the circular arrow submit button inside the active prompt container or side drawer.
-   * Dispatches full pointer/mouse sequence, or falls back to Enter key.
+   * Dispatches Angular Form Submission via Enter key sequence, native form.requestSubmit(), and pointer click.
    */
-  async function triggerFlowSubmitAction(inputEl, maxWaitMs = 10000) {
+  async function triggerFlowSubmitAction(targetInput, maxWaitMs = 10000) {
     const startTime = Date.now();
     let buttonElement = null;
 
+    // Poll for button to become enabled if it exists
     while (Date.now() - startTime < maxWaitMs) {
-      buttonElement = findGoogleFlowSubmitButton(inputEl);
+      buttonElement = findGoogleFlowSubmitButton(targetInput);
 
       if (buttonElement) {
         const isDisabled = buttonElement.disabled ||
@@ -308,11 +308,7 @@
           buttonElement.classList.contains('disabled');
 
         if (!isDisabled) {
-          console.log("[Flow Automator] Found and clicked submit button:", buttonElement);
-          console.log("Triggered submit button:", buttonElement);
-          dispatchPointerAndClick(buttonElement);
-          await delay(400);
-          return true;
+          break;
         } else {
           console.log('[Flow Automator] Submit button found in drawer but disabled. Waiting for Angular state...');
         }
@@ -321,44 +317,71 @@
       await delay(500);
     }
 
-    // If button was found inside drawer, click it
-    if (buttonElement) {
-      console.log("[Flow Automator] Found and clicked submit button:", buttonElement);
-      console.log("Triggered submit button:", buttonElement);
-      dispatchPointerAndClick(buttonElement);
-      await delay(400);
-      return true;
-    }
-
-    // Fallback: Dispatch Enter Key Sequence directly on input (NEVER clicks global header buttons)
-    console.log('[Flow Automator] No submit button in drawer. Dispatching Enter key sequence directly onto input...');
-    inputEl.focus();
-    const eventParams = {
-      key: 'Enter',
-      code: 'Enter',
-      keyCode: 13,
-      which: 13,
-      charCode: 13,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      shiftKey: false,
-      ctrlKey: false
-    };
-
-    inputEl.dispatchEvent(new KeyboardEvent('keydown', eventParams));
-    inputEl.dispatchEvent(new KeyboardEvent('keypress', eventParams));
-    inputEl.dispatchEvent(new KeyboardEvent('keyup', eventParams));
-
-    if (inputEl.form) {
+    // 1. Target the enclosing <form> directly
+    let form = targetInput.closest('form') || targetInput.form;
+    if (!form) {
       try {
-        if (typeof inputEl.form.requestSubmit === 'function') {
-          inputEl.form.requestSubmit();
-        }
-      } catch (e) {}
+        form = document.querySelector('form:has(flow-generate-icon-button)') ||
+               document.querySelector('form:has(button[aria-label*="generation" i])');
+      } catch (e) {
+        form = document.querySelector('form');
+      }
+    }
+    if (!form) {
+      const drawer = targetInput.closest('[role="complementary"]') || 
+                     targetInput.closest('aside') || 
+                     targetInput.closest('.session-container');
+      if (drawer) form = drawer.querySelector('form');
     }
 
-    await delay(300);
+    const submitBtn = buttonElement || 
+                      (form ? form.querySelector('button[type="submit"]') : null) || 
+                      document.querySelector('button[aria-label*="Start generation" i]') ||
+                      document.querySelector('flow-generate-icon-button button');
+
+    console.log("[Flow Automator] Executing Angular Form submission sequence...");
+
+    // Step A: Focus input
+    targetInput.focus();
+    await delay(50);
+
+    // Step B: Dispatch Enter key with keydown, keypress, keyup directly on targetInput
+    const enterOptions = { 
+      key: 'Enter', 
+      code: 'Enter', 
+      keyCode: 13, 
+      which: 13, 
+      charCode: 13,
+      bubbles: true, 
+      cancelable: true,
+      composed: true
+    };
+    targetInput.dispatchEvent(new KeyboardEvent('keydown', enterOptions));
+    targetInput.dispatchEvent(new KeyboardEvent('keypress', enterOptions));
+    targetInput.dispatchEvent(new KeyboardEvent('keyup', enterOptions));
+
+    // Step C: Trigger native requestSubmit on the form
+    if (form && typeof form.requestSubmit === 'function') {
+      try {
+        form.requestSubmit(submitBtn || undefined);
+        console.log("[Flow Automator] Dispatched form.requestSubmit() successfully.");
+      } catch (err) {
+        console.warn("[Flow Automator] form.requestSubmit failed, falling back to button click", err);
+        if (submitBtn) {
+          try { submitBtn.click(); } catch (e) {}
+        }
+      }
+    } else if (submitBtn) {
+      try { submitBtn.click(); } catch (e) {}
+    }
+
+    // Step D: Also dispatch full pointer & click sequence on submit button & touch target
+    if (submitBtn) {
+      console.log("[Flow Automator] Found and clicked submit button:", submitBtn);
+      dispatchPointerAndClick(submitBtn);
+    }
+
+    await delay(400);
     return true;
   }
 
