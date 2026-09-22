@@ -18,7 +18,7 @@ class FlowQueueManager {
     this.currentIndex = -1;
     this.status = 'idle'; // 'idle' | 'running' | 'paused' | 'stopped'
     this.maxRetries = 2;
-    this.timeoutMs = 45000; // 45s generation timeout
+    this.timeoutMs = 90000; // 90s generation timeout for high-res comic renders
     this.targetTabId = null;
 
     // Permanent Duplicate Blocker Set

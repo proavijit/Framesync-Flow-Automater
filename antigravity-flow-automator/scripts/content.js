@@ -1,11 +1,18 @@
 /**
- * Antigravity Flow Automator - Google Flow Content Script (v1.3.1)
- * Critical Fix for Submission:
- * - Exhaustive button locator (send/generate/submit, arrow SVGs, md-icon-button)
- * - Proximity search starting from the input's closest parent form/container
- * - Full synthetic KeyboardEvent dispatch (keydown, keypress, keyup, Enter keyCode 13)
- * - Form requestSubmit fallback
- * - Strict image snapshot observation (never downloads old/gallery assets)
+ * Antigravity Flow Automator - Google Flow Content Script (v1.4.0)
+ * 
+ * Major Architectural Overhaul:
+ * 1. Step-by-Step Human Pacing:
+ *    - Chunked natural typing simulation with beforeinput/input events.
+ *    - 2-3s delay for character reference portrait registration.
+ *    - 3-5s pre-submission stabilization pause.
+ * 2. Robust Active Button Waiting:
+ *    - Polls up to 10s if the Generate/Send button is disabled.
+ *    - Realistic pointer/mouse sequence dispatch.
+ *    - Safe Enter key fallback only after full input stabilization.
+ * 3. Extended 90s Render Timeout & Smart Canvas Observation:
+ *    - 90s window for high-end 16:9 comic/illustration AI rendering.
+ *    - Strict snapshot filtering: NEVER returns old/gallery images.
  */
 
 (function () {
@@ -14,7 +21,7 @@
   }
   window.__flowAutomatorInjected = true;
 
-  console.log('[Flow Automator] Enhanced Content Script active with robust submit triggers.');
+  console.log('[Flow Automator] Human-Paced Content Script (v1.4.0) initialized.');
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.action) return false;
@@ -31,8 +38,7 @@
     }
 
     if (message.action === 'CHECK_PROJECT_STATUS') {
-      const status = detectActiveProject();
-      sendResponse({ isProjectOpen: status });
+      sendResponse({ isProjectOpen: detectActiveProject() });
       return false;
     }
 
@@ -40,7 +46,7 @@
       handlePromptGeneration(message.payload)
         .then(result => sendResponse(result))
         .catch(err => sendResponse({ success: false, error: err.message || String(err) }));
-      return true;
+      return true; // Asynchronous response channel
     }
 
     return false;
@@ -58,17 +64,20 @@
     return false;
   }
 
-  async function handlePromptGeneration({ tag, prompt, referenceImages = [], timeoutMs = 45000 }) {
-    console.log(`[Flow Automator] Processing #${tag}. Timeout: ${timeoutMs}ms`);
+  /**
+   * Main generation pipeline with realistic human-like pacing
+   */
+  async function handlePromptGeneration({ tag, prompt, referenceImages = [], timeoutMs = 90000 }) {
+    console.log(`[Flow Automator] === Starting Job #${tag} [Timeout: ${Math.round(timeoutMs / 1000)}s] ===`);
 
-    // Step 1: Ensure input is available
+    // Step 1: Ensure active project canvas & input field are ready
     let promptInput = findPromptInput();
     if (!promptInput) {
       const newProjectBtn = findNewProjectButton();
       if (newProjectBtn) {
-        console.log('[Flow Automator] Clicking "New Project"...');
-        newProjectBtn.click();
-        await delay(2000);
+        console.log('[Flow Automator] Home screen detected. Navigating to New Project...');
+        clickElementNaturally(newProjectBtn);
+        await delay(3000);
       }
       promptInput = findPromptInput();
       if (!promptInput) {
@@ -76,35 +85,252 @@
       }
     }
 
-    // Step 2: Upload Character Reference Images if attached
+    // Step 2: Snapshot all existing image/canvas assets BEFORE typing begins
+    const initialSnapshot = snapshotAllCurrentImages();
+    console.log(`[Flow Automator] Initial asset snapshot locked: ${initialSnapshot.size} existing items.`);
+
+    // Step 3: Human-like Chunked Typing into Prompt Field
+    console.log('[Flow Automator] Step 1 & 2: Focusing and typing prompt with realistic pacing...');
+    await humanLikeTyping(promptInput, prompt);
+
+    // Step 4: Handle Character References & Portrait Uploads
+    const hasCharacters = (referenceImages && referenceImages.length > 0) || /man\s*0\d|julian|character/i.test(prompt);
     if (referenceImages && referenceImages.length > 0) {
+      console.log(`[Flow Automator] Step 3: Attaching ${referenceImages.length} character reference image(s)...`);
       await attemptReferenceImageUpload(referenceImages);
     }
 
-    // Step 3: Strict image baseline snapshot
-    const initialSnapshot = snapshotAllCurrentImages();
-    console.log(`[Flow Automator] Snapshot captured: ${initialSnapshot.size} existing assets.`);
-
-    // Step 4: Insert Multi-Line Prompt
-    await insertMultiLinePrompt(promptInput, prompt);
-    await delay(350);
-
-    // Step 5: Trigger Generation Submission (Buttons + Keyboard Enter Sequence)
-    const submitted = triggerRobustSubmission(promptInput);
-    if (!submitted) {
-      throw new Error('Failed to dispatch generation submission (all submit strategies failed).');
+    if (hasCharacters) {
+      console.log('[Flow Automator] Character references detected. Pausing 3 seconds for DOM/chip registration...');
+      await delay(3000); // 2-3s pause for character chips and state to register
+    } else {
+      await delay(1200);
     }
-    console.log(`[Flow Automator] Submission dispatched for #${tag}. Awaiting new render...`);
 
-    // Step 6: Await strictly NEW image render
+    // Step 5: Input Stabilization Pause (3-5s) before submission
+    console.log('[Flow Automator] Step 4: Waiting 4 seconds for UI state stabilization and button activation...');
+    await delay(4000);
+
+    // Step 6: Robust Active Button Waiting & Click Simulation
+    console.log('[Flow Automator] Step 5: Dispatching generation submission...');
+    const submitted = await triggerRobustActiveSubmission(promptInput, 10000);
+    if (!submitted) {
+      throw new Error('Failed to dispatch generation submission after 10s of button polling and Enter key dispatch.');
+    }
+    console.log(`[Flow Automator] Submission sent successfully for #${tag}. Listening for new render...`);
+
+    // Step 7: Await Brand New Render within Extended Window (90s)
     const newAssetUrl = await waitForBrandNewRender(initialSnapshot, timeoutMs);
-    console.log(`[Flow Automator] Detected new render for #${tag}: ${newAssetUrl.slice(0, 60)}...`);
+    console.log(`[Flow Automator] Render confirmed for #${tag}: ${newAssetUrl.slice(0, 65)}...`);
 
     return {
       success: true,
       tag: tag,
       imageUrl: newAssetUrl
     };
+  }
+
+  /**
+   * Human-Like Natural Typing Simulation
+   * Types the text in small progressive chunks with realistic intervals.
+   */
+  async function humanLikeTyping(el, fullText) {
+    el.focus();
+    el.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+    await delay(300);
+
+    // Clear previous text if any
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+      setElementValue(el, '');
+    } else if (el.isContentEditable) {
+      el.innerHTML = '';
+    }
+
+    // Break text into natural chunks (15-30 characters per slice)
+    const chunkSize = 25;
+    let accumulated = '';
+
+    for (let i = 0; i < fullText.length; i += chunkSize) {
+      const slice = fullText.slice(i, i + chunkSize);
+      accumulated += slice;
+
+      if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+        setElementValue(el, accumulated);
+      } else if (el.isContentEditable) {
+        // Render newlines as divs/br for contenteditable
+        el.innerHTML = accumulated
+          .split('\n')
+          .map(line => line.trim() ? `<div>${escapeHtml(line)}</div>` : '<div><br></div>')
+          .join('');
+      }
+
+      // Dispatch realistic input events for every slice
+      el.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        data: slice,
+        inputType: 'insertText'
+      }));
+      el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+
+      // Natural typing delay (35ms - 75ms per chunk)
+      await delay(45);
+    }
+
+    // Final stabilization events
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('compositionend', { bubbles: true }));
+    await delay(200);
+  }
+
+  function setElementValue(el, val) {
+    const prototype = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    if (nativeSetter) {
+      nativeSetter.call(el, val);
+    } else {
+      el.value = val;
+    }
+  }
+
+  /**
+   * Robust Active Submit Trigger:
+   * Polls up to maxWaitMs (10s) if the Generate button is disabled,
+   * then executes real pointer/mouse sequence, with Enter key fallback.
+   */
+  async function triggerRobustActiveSubmission(inputEl, maxWaitMs = 10000) {
+    const startTime = Date.now();
+    let targetButton = null;
+
+    // Search for button in local proximity first, then globally
+    while (Date.now() - startTime < maxWaitMs) {
+      targetButton = findGenerateButton(inputEl);
+
+      if (targetButton) {
+        const isDisabled = targetButton.disabled ||
+          targetButton.getAttribute('aria-disabled') === 'true' ||
+          targetButton.classList.contains('disabled');
+
+        if (!isDisabled) {
+          console.log('[Flow Automator] Generate button is active! Simulating user click:', targetButton);
+          clickElementNaturally(targetButton);
+          await delay(400);
+          return true;
+        } else {
+          console.log('[Flow Automator] Button found but currently disabled. Waiting for UI state update...');
+        }
+      }
+
+      await delay(500);
+    }
+
+    // If button was found even if still flagged, try clicking anyway
+    if (targetButton) {
+      console.log('[Flow Automator] Attempting click on button after wait timeout:', targetButton);
+      clickElementNaturally(targetButton);
+      await delay(400);
+    }
+
+    // Always dispatch Enter Keyboard sequence as reliable fallback
+    console.log('[Flow Automator] Dispatching Enter KeyboardEvent sequence on input...');
+    inputEl.focus();
+    const eventParams = {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      charCode: 13,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false
+    };
+
+    inputEl.dispatchEvent(new KeyboardEvent('keydown', eventParams));
+    inputEl.dispatchEvent(new KeyboardEvent('keypress', eventParams));
+    inputEl.dispatchEvent(new KeyboardEvent('keyup', eventParams));
+
+    if (inputEl.form) {
+      try {
+        if (typeof inputEl.form.requestSubmit === 'function') {
+          inputEl.form.requestSubmit();
+        }
+      } catch (e) {
+        // ignore form submit error
+      }
+    }
+
+    await delay(300);
+    return true;
+  }
+
+  function findGenerateButton(inputEl) {
+    // 1. Check local container / parent form
+    const container = inputEl.closest('form, div.prompt-bar, div.prompt-container, [role="form"], [class*="prompt" i], [class*="input" i]') || inputEl.parentElement;
+    if (container) {
+      const localButtons = container.querySelectorAll('button, [role="button"], md-icon-button, mwc-icon-button');
+      for (const btn of localButtons) {
+        if (isElementVisible(btn) && isSubmitOrGenerateButton(btn)) {
+          return btn;
+        }
+      }
+    }
+
+    // 2. Global deep search across Shadow DOM
+    const allButtons = querySelectorAllDeep('button, [role="button"], md-icon-button, mwc-icon-button');
+    for (const btn of allButtons) {
+      if (isElementVisible(btn) && isSubmitOrGenerateButton(btn)) {
+        return btn;
+      }
+    }
+
+    return null;
+  }
+
+  function isSubmitOrGenerateButton(btn) {
+    if (!btn) return false;
+    const type = (btn.getAttribute('type') || '').toLowerCase();
+    if (type === 'submit') return true;
+
+    const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+    const title = (btn.getAttribute('title') || '').toLowerCase();
+    const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+
+    const matchKeywords = ['generate', 'send', 'submit', 'run', 'create'];
+    for (const kw of matchKeywords) {
+      if (aria.includes(kw) || title.includes(kw) || text === kw) {
+        return true;
+      }
+    }
+
+    // Check SVG icons (paper plane, send, arrow-up)
+    const svgs = btn.querySelectorAll('svg');
+    for (const svg of svgs) {
+      const svgAria = (svg.getAttribute('aria-label') || '').toLowerCase();
+      if (matchKeywords.some(kw => svgAria.includes(kw))) return true;
+      const path = svg.querySelector('path');
+      if (path && (path.getAttribute('d') || '').length > 10) return true;
+    }
+
+    return false;
+  }
+
+  function clickElementNaturally(el) {
+    const rect = el.getBoundingClientRect();
+    const clientX = rect.left + rect.width / 2;
+    const clientY = rect.top + rect.height / 2;
+    const mouseOpts = { bubbles: true, cancelable: true, composed: true, clientX, clientY };
+
+    el.dispatchEvent(new PointerEvent('pointerdown', mouseOpts));
+    el.dispatchEvent(new MouseEvent('mousedown', mouseOpts));
+    el.focus();
+    el.dispatchEvent(new PointerEvent('pointerup', mouseOpts));
+    el.dispatchEvent(new MouseEvent('mouseup', mouseOpts));
+    el.dispatchEvent(new MouseEvent('click', mouseOpts));
   }
 
   /**
@@ -191,170 +417,9 @@
     return null;
   }
 
-  async function insertMultiLinePrompt(el, text) {
-    el.focus();
-    await delay(100);
-
-    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-      const prototype = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-
-      if (nativeSetter) {
-        nativeSetter.call(el, text);
-      } else {
-        el.value = text;
-      }
-    } else if (el.isContentEditable) {
-      el.focus();
-      document.execCommand('selectAll', false, null);
-
-      let insertSuccess = false;
-      try {
-        insertSuccess = document.execCommand('insertText', false, text);
-      } catch (e) {
-        insertSuccess = false;
-      }
-
-      if (!insertSuccess) {
-        const formattedHtml = text
-          .split('\n')
-          .map(line => line.trim() ? `<div>${escapeHtml(line)}</div>` : '<div><br></div>')
-          .join('');
-        el.innerHTML = formattedHtml;
-      }
-    }
-
-    // Comprehensive synthetic events to trigger framework reactive state
-    el.dispatchEvent(new Event('focus', { bubbles: true }));
-    el.dispatchEvent(new InputEvent('beforeinput', {
-      bubbles: true,
-      cancelable: true,
-      data: text,
-      inputType: 'insertText'
-    }));
-    el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('compositionend', { bubbles: true }));
-  }
-
   /**
-   * Robust Submit Trigger:
-   * 1. Proximity button search (closest prompt container / form / chat bar).
-   * 2. Global deep search for submit/send/generate/arrow buttons.
-   * 3. Synthetic KeyboardEvent Enter sequence (keydown, keypress, keyup).
-   * 4. Form requestSubmit() fallback.
+   * Snapshot all existing images and canvas renders currently in the DOM
    */
-  function triggerRobustSubmission(inputEl) {
-    let triggered = false;
-
-    // A. Search in local proximity (closest container, form, or chat panel)
-    const container = inputEl.closest('form, div.prompt-bar, div.prompt-container, [role="form"], [class*="prompt" i], [class*="input" i]') || inputEl.parentElement;
-    if (container) {
-      const localButtons = container.querySelectorAll('button, [role="button"], md-icon-button, mwc-icon-button');
-      for (const btn of localButtons) {
-        if (!isElementVisible(btn) || btn.disabled) continue;
-        if (isSubmitOrGenerateButton(btn)) {
-          console.log('[Flow Automator] Clicking local submit button in container:', btn);
-          clickButtonSafely(btn);
-          triggered = true;
-          break;
-        }
-      }
-    }
-
-    // B. Global deep search if not yet triggered
-    if (!triggered) {
-      const allButtons = querySelectorAllDeep('button, [role="button"], md-icon-button, mwc-icon-button');
-      for (const btn of allButtons) {
-        if (!isElementVisible(btn) || btn.disabled) continue;
-        if (isSubmitOrGenerateButton(btn)) {
-          console.log('[Flow Automator] Clicking global submit button:', btn);
-          clickButtonSafely(btn);
-          triggered = true;
-          break;
-        }
-      }
-    }
-
-    // C. Always dispatch full Keyboard Enter Sequence on the input element
-    inputEl.focus();
-    const eventParams = {
-      key: 'Enter',
-      code: 'Enter',
-      keyCode: 13,
-      which: 13,
-      charCode: 13,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      shiftKey: false,
-      ctrlKey: false,
-      altKey: false,
-      metaKey: false
-    };
-
-    inputEl.dispatchEvent(new KeyboardEvent('keydown', eventParams));
-    inputEl.dispatchEvent(new KeyboardEvent('keypress', eventParams));
-    inputEl.dispatchEvent(new KeyboardEvent('keyup', eventParams));
-    console.log('[Flow Automator] Dispatched synthetic Enter key sequence.');
-
-    // D. Form requestSubmit() fallback
-    if (inputEl.form) {
-      try {
-        if (typeof inputEl.form.requestSubmit === 'function') {
-          inputEl.form.requestSubmit();
-        } else {
-          inputEl.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        }
-      } catch (err) {
-        console.warn('[Flow Automator] form submit error:', err.message);
-      }
-    }
-
-    return true;
-  }
-
-  function isSubmitOrGenerateButton(btn) {
-    if (!btn) return false;
-    const type = (btn.getAttribute('type') || '').toLowerCase();
-    if (type === 'submit') return true;
-
-    const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-    const title = (btn.getAttribute('title') || '').toLowerCase();
-    const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-
-    // Check labels
-    const matchKeywords = ['generate', 'send', 'submit', 'run', 'create'];
-    for (const kw of matchKeywords) {
-      if (aria.includes(kw) || title.includes(kw) || text === kw) {
-        return true;
-      }
-    }
-
-    // Check SVG icons inside button (arrow-up, paper plane, send icons)
-    const svgs = btn.querySelectorAll('svg');
-    if (svgs.length > 0) {
-      for (const svg of svgs) {
-        const svgAria = (svg.getAttribute('aria-label') || '').toLowerCase();
-        if (matchKeywords.some(kw => svgAria.includes(kw))) return true;
-        // Buttons containing path or arrow icons near input
-        const path = svg.querySelector('path');
-        if (path) {
-          const d = path.getAttribute('d') || '';
-          if (d.length > 10) return true; // Likely a graphic icon like send or arrow
-        }
-      }
-    }
-
-    return false;
-  }
-
-  function clickButtonSafely(btn) {
-    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true }));
-    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, composed: true }));
-    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
-  }
-
   function snapshotAllCurrentImages() {
     const snapshot = new Set();
     const imgs = querySelectorAllDeep('img');
@@ -362,9 +427,22 @@
       if (img.src) snapshot.add(img.src);
       if (img.currentSrc) snapshot.add(img.currentSrc);
     }
+    const canvases = querySelectorAllDeep('canvas');
+    for (const canvas of canvases) {
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        if (dataUrl) snapshot.add(dataUrl);
+      } catch (e) {
+        // tainted
+      }
+    }
     return snapshot;
   }
 
+  /**
+   * Monitor DOM mutations and canvas/image changes to detect high-res render.
+   * Extended 90-second timeout window with smart canvas observation.
+   */
   function waitForBrandNewRender(initialSnapshot, timeoutMs) {
     return new Promise((resolve, reject) => {
       let isResolved = false;
@@ -383,16 +461,17 @@
       const checkForNewAsset = () => {
         if (isResolved) return;
 
+        // 1. Check all rendered images
         const allImgs = querySelectorAllDeep('img').reverse();
 
         for (const img of allImgs) {
           const src = img.currentSrc || img.src;
           if (!src) continue;
 
-          // Skip any asset in initial snapshot
+          // Skip any asset that was present before this generation started
           if (initialSnapshot.has(src)) continue;
 
-          // Skip avatars, icons, logos
+          // Skip avatars, icons, logos, svgs
           if (
             src.includes('googleusercontent.com/avatar') ||
             src.includes('gstatic.com') ||
@@ -410,6 +489,7 @@
           const isData = src.startsWith('data:image/');
           const isHttp = src.startsWith('http://') || src.startsWith('https://');
 
+          // Check if candidate is a completed high-res render (> 160px)
           if ((isBlob || isData || isHttp) && (width >= 160 || height >= 160 || (isBlob && width === 0))) {
             if (img.complete && (img.naturalWidth > 120 || isBlob || isData)) {
               cleanup();
@@ -419,18 +499,19 @@
           }
         }
 
+        // 2. Check all rendered HTML5 canvases (e.g. 16:9 comic illustrations)
         const canvases = querySelectorAllDeep('canvas');
         for (const canvas of canvases) {
-          if (canvas.width > 250 && canvas.height > 250) {
+          if (canvas.width >= 250 && canvas.height >= 250) {
             try {
               const dataUrl = canvas.toDataURL('image/png');
-              if (dataUrl && dataUrl.length > 1000 && !initialSnapshot.has(dataUrl)) {
+              if (dataUrl && dataUrl.length > 2000 && !initialSnapshot.has(dataUrl)) {
                 cleanup();
                 resolve(dataUrl);
                 return;
               }
             } catch (e) {
-              // tainted canvas
+              // cross-origin tainted canvas
             }
           }
         }
@@ -444,12 +525,14 @@
         attributeFilter: ['src', 'srcset', 'style', 'class']
       });
 
-      pollTimer = setInterval(() => checkForNewAsset(), 600);
+      // Poll every 750ms
+      pollTimer = setInterval(() => checkForNewAsset(), 750);
 
+      // Extended timeout handling (90s default)
       timeoutTimer = setTimeout(() => {
         cleanup();
         const elapsed = Math.round((Date.now() - startTime) / 1000);
-        reject(new Error(`Timeout: No new render produced after ${elapsed}s. Generation aborted to prevent downloading stale assets.`));
+        reject(new Error(`Timeout: No new render detected after ${elapsed}s. Generation aborted to prevent downloading stale assets.`));
       }, timeoutMs);
 
       checkForNewAsset();
@@ -490,7 +573,7 @@
         targetInput.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
         targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
         console.log(`[Flow Automator] Attached ${dt.files.length} reference image(s) to Flow file slot.`);
-        await delay(400);
+        await delay(500);
       }
     } catch (err) {
       console.warn('[Flow Automator] Reference image upload warning:', err.message);
