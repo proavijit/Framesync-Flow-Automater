@@ -139,7 +139,7 @@
 
   /**
    * 1. Angular & Native Input Dispatch
-   * Directly triggers browser input engine and Angular Zone / NgModel change detection.
+   * Forces Angular FormControl update via native InputEvent simulation.
    */
   function injectAngularInputValue(targetInput, promptText) {
     if (!targetInput) return;
@@ -147,7 +147,23 @@
     targetInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
     targetInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
 
-    // Select all and use input command to trigger native browser input engine
+    // Clear input completely first
+    if (targetInput.isContentEditable) {
+      targetInput.innerText = '';
+    } else {
+      targetInput.value = '';
+    }
+    targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+
+    // Use InputEvent to simulate actual user typing rather than direct property assignment
+    const inputEvent = new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      inputType: 'insertText',
+      data: promptText
+    });
+
     if (targetInput.isContentEditable) {
       targetInput.focus();
       document.execCommand('selectAll', false, null);
@@ -158,35 +174,27 @@
         execSuccess = false;
       }
       if (!execSuccess) {
-        targetInput.innerHTML = promptText
-          .split('\n')
-          .map(line => line.trim() ? `<div>${escapeHtml(line)}</div>` : '<div><br></div>')
-          .join('');
+        targetInput.innerText = promptText;
       }
-      targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-      targetInput.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
-      // For textarea / input
       targetInput.value = promptText;
 
-      // Also ensure native prototype setter is called if overridden
       const prototype = targetInput.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
       const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
       if (nativeSetter) {
         try { nativeSetter.call(targetInput, promptText); } catch (e) {}
       }
 
-      // Update valueTracker if present
       if (targetInput._valueTracker) {
         try { targetInput._valueTracker.setValue(promptText); } catch (e) {}
       }
-
-      // Trigger standard Angular input cycle with composed: true for zone check
-      targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-      targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-      targetInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }));
-      targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ' ' }));
     }
+
+    targetInput.dispatchEvent(inputEvent);
+    targetInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+    targetInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }));
+    targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ' ' }));
   }
 
   /**
@@ -345,20 +353,14 @@
     targetInput.focus();
     await delay(50);
 
-    // Step B: Dispatch Enter key with keydown, keypress, keyup directly on targetInput
-    const enterOptions = { 
-      key: 'Enter', 
-      code: 'Enter', 
-      keyCode: 13, 
-      which: 13, 
-      charCode: 13,
-      bubbles: true, 
-      cancelable: true,
-      composed: true
+    // Step B: Keyboard Enter Submission (Google Flow Chat Engine)
+    const triggerEnter = (el) => {
+      const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+      el.dispatchEvent(new KeyboardEvent('keydown', opts));
+      el.dispatchEvent(new KeyboardEvent('keypress', opts));
+      el.dispatchEvent(new KeyboardEvent('keyup', opts));
     };
-    targetInput.dispatchEvent(new KeyboardEvent('keydown', enterOptions));
-    targetInput.dispatchEvent(new KeyboardEvent('keypress', enterOptions));
-    targetInput.dispatchEvent(new KeyboardEvent('keyup', enterOptions));
+    triggerEnter(targetInput);
 
     // Step C: Trigger native requestSubmit on the form
     if (form && typeof form.requestSubmit === 'function') {
@@ -366,16 +368,20 @@
         form.requestSubmit(submitBtn || undefined);
         console.log("[Flow Automator] Dispatched form.requestSubmit() successfully.");
       } catch (err) {
-        console.warn("[Flow Automator] form.requestSubmit failed, falling back to button click", err);
-        if (submitBtn) {
-          try { submitBtn.click(); } catch (e) {}
-        }
+        console.warn("[Flow Automator] form.requestSubmit failed, falling back to touch area click", err);
       }
-    } else if (submitBtn) {
-      try { submitBtn.click(); } catch (e) {}
     }
 
-    // Step D: Also dispatch full pointer & click sequence on submit button & touch target
+    // Step D: Fallback: Trigger through Angular Material Touch Area & Submit Button
+    const touchArea = document.querySelector('flow-generate-icon-button .mat-mdc-button-touch-target') ||
+                      (form ? form.querySelector('.mat-mdc-button-touch-target') : null) ||
+                      document.querySelector('button[aria-label="Start generation"]') ||
+                      submitBtn;
+    if (touchArea) {
+      console.log("[Flow Automator] Triggering touch area:", touchArea);
+      try { touchArea.click(); } catch (e) {}
+    }
+
     if (submitBtn) {
       console.log("[Flow Automator] Found and clicked submit button:", submitBtn);
       dispatchPointerAndClick(submitBtn);
