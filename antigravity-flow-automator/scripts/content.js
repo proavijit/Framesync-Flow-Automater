@@ -265,7 +265,8 @@
   }
 
   /**
-   * Locate the circular arrow submit button and trigger dispatch
+   * Locate the circular arrow submit button inside the active prompt container.
+   * Dispatches full pointer/mouse sequence, or falls back to Enter key.
    */
   async function triggerFlowSubmitAction(inputEl, maxWaitMs = 10000) {
     const startTime = Date.now();
@@ -285,22 +286,23 @@
           await delay(400);
           return true;
         } else {
-          console.log('[Flow Automator] Submit arrow button found but disabled. Waiting for React state...');
+          console.log('[Flow Automator] Submit button found inside prompt container but disabled. Waiting for React state...');
         }
       }
 
       await delay(500);
     }
 
-    // If still found after wait, click it directly
+    // If button was found inside prompt container, click it
     if (buttonElement) {
       console.log("Triggered submit button:", buttonElement);
       dispatchPointerAndClick(buttonElement);
       await delay(400);
+      return true;
     }
 
-    // Enter Key Fallback
-    console.log('[Flow Automator] Dispatching Enter KeyboardEvent sequence as fallback...');
+    // Fallback: Dispatch Enter Key Sequence directly on input (NEVER clicks global header buttons)
+    console.log('[Flow Automator] No submit button inside prompt container. Dispatching Enter key sequence directly onto input...');
     inputEl.focus();
     const eventParams = {
       key: 'Enter',
@@ -332,68 +334,125 @@
   }
 
   /**
-   * Find the circular arrow submit button in bottom-right action container
+   * Exclude header, navigation, and Google Account profile elements
+   */
+  function isExcludedHeaderElement(el) {
+    if (!el) return true;
+
+    // Reject header, nav, or Google Account wrappers
+    if (el.closest('header, nav, [role="banner"], [role="navigation"], .gb_C, [class*="gb_"], [href*="SignOutOptions"]')) {
+      return true;
+    }
+
+    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+    const title = (el.getAttribute('title') || '').toLowerCase();
+    const href = (el.getAttribute('href') || '').toLowerCase();
+    const className = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+
+    const forbidden = [
+      'google account',
+      'account',
+      'sign in',
+      'sign out',
+      'profile',
+      'avatar',
+      'notifications',
+      'google apps',
+      'help',
+      'feedback',
+      'menu',
+      'settings'
+    ];
+
+    for (const term of forbidden) {
+      if (aria.includes(term) || title.includes(term) || href.includes(term) || className.includes(term)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Specifically targets the submit button inside the active prompt container.
+   * SCOPED ONLY to the active prompt container hierarchy.
+   * Ensures the button is positioned near or below the prompt input, not in the top header.
    */
   function findGoogleFlowSubmitButton(inputEl) {
-    // 1. Check parent container hierarchy
-    let curr = inputEl;
-    for (let depth = 0; depth < 5 && curr && curr !== document.body; depth++) {
-      const candidates = Array.from(curr.querySelectorAll(
-        'button:not([disabled]), [role="button"]:not([aria-disabled="true"]), md-icon-button:not([disabled]), mwc-icon-button:not([disabled])'
-      ));
+    if (!inputEl) return null;
 
-      const actionButtons = candidates.filter(btn => {
-        if (!isElementVisible(btn)) return false;
-        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-        const hasSvg = btn.querySelector('svg') !== null;
-        return hasSvg ||
-          aria.includes('run') ||
-          aria.includes('send') ||
-          aria.includes('generate') ||
-          aria.includes('submit') ||
-          aria.includes('create');
-      });
+    const inputRect = inputEl.getBoundingClientRect();
 
-      if (actionButtons.length > 0) {
-        // Submit arrow button is the last interactive button in the action row
-        return actionButtons[actionButtons.length - 1];
-      }
-      curr = curr.parentElement;
+    // 1. Get the prompt container wrapper
+    const promptContainer = inputEl.closest('form') ||
+                            inputEl.closest('div[class*="prompt" i]') ||
+                            inputEl.closest('div[class*="chat" i]') ||
+                            inputEl.closest('div[class*="input" i]') ||
+                            inputEl.closest('[role="region"]') ||
+                            inputEl.parentElement?.parentElement?.parentElement ||
+                            inputEl.parentElement;
+
+    if (!promptContainer) return null;
+
+    // 2. Query candidates strictly within promptContainer
+    const candidateSelectors = [
+      'button:not([disabled]):has(svg)',
+      'div[role="button"]:not([aria-disabled="true"]):has(svg)',
+      'button:not([disabled])[aria-label*="send" i]',
+      'button:not([disabled])[aria-label*="run" i]',
+      'button:not([disabled])[aria-label*="generate" i]',
+      'button:not([disabled])[type="submit"]',
+      'button:not([disabled])',
+      '[role="button"]:not([aria-disabled="true"])',
+      'md-icon-button:not([disabled])'
+    ];
+
+    let candidates = [];
+    for (const sel of candidateSelectors) {
+      try {
+        const els = Array.from(promptContainer.querySelectorAll(sel));
+        if (els.length > 0) candidates = candidates.concat(els);
+      } catch (e) {}
     }
 
-    // 2. Sibling action container search
-    const container = inputEl.closest('form, div[class*="prompt" i], div[class*="input" i], div[class*="editor" i], [role="region"], [role="main"]') || inputEl.parentElement;
-    if (container) {
-      const buttons = Array.from(container.querySelectorAll('button, [role="button"], md-icon-button'));
-      const svgButtons = buttons.filter(b => isElementVisible(b) && b.querySelector('svg'));
-      if (svgButtons.length > 0) {
-        return svgButtons[svgButtons.length - 1];
-      }
-    }
+    // Deduplicate candidates
+    const uniqueCandidates = Array.from(new Set(candidates));
 
-    // 3. Deep Shadow DOM search
-    const allButtons = querySelectorAllDeep('button, [role="button"], md-icon-button');
-    const matching = allButtons.filter(btn => {
+    // Filter valid action buttons
+    const validButtons = uniqueCandidates.filter(btn => {
       if (!isElementVisible(btn)) return false;
+      if (isExcludedHeaderElement(btn)) return false;
+
+      const rect = btn.getBoundingClientRect();
+      // Must be positioned near or below the prompt input, not at the top of the window!
+      if (rect.top < inputRect.top - 20) {
+        return false;
+      }
+
+      const hasSvg = btn.querySelector('svg') !== null;
       const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
       const title = (btn.getAttribute('title') || '').toLowerCase();
-      const hasSvg = btn.querySelector('svg') !== null;
-      return aria.includes('run') ||
+      const type = (btn.getAttribute('type') || '').toLowerCase();
+
+      return type === 'submit' ||
+        hasSvg ||
         aria.includes('send') ||
+        aria.includes('run') ||
         aria.includes('generate') ||
         aria.includes('submit') ||
-        title.includes('generate') ||
         title.includes('send') ||
-        (hasSvg && (aria.includes('arrow') || aria.includes('icon')));
+        title.includes('generate');
     });
 
-    if (matching.length > 0) {
-      return matching[matching.length - 1];
-    }
-
-    const anySvg = allButtons.filter(btn => isElementVisible(btn) && btn.querySelector('svg'));
-    if (anySvg.length > 0) {
-      return anySvg[anySvg.length - 1];
+    if (validButtons.length > 0) {
+      // Pick the button furthest right and bottom (highest right + bottom),
+      // which corresponds to the circular arrow button in the bottom-right of the prompt box
+      validButtons.sort((a, b) => {
+        const rA = a.getBoundingClientRect();
+        const rB = b.getBoundingClientRect();
+        return (rA.right + rA.bottom) - (rB.right + rB.bottom);
+      });
+      return validButtons[validButtons.length - 1];
     }
 
     return null;
